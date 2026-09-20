@@ -120,19 +120,36 @@ one of them writes through. Keep `--link` to dependency caches.
 
 ## Known limits
 
-**A rewritten file is one hunk.** Git emits a single hunk when a change has no
-surviving context, so whodunit can narrow a full-file rewrite to the file but
-not to a line within it. Lowering `--context` helps only when some context
-survives.
+**A brand-new file is one change.** There is no baseline to bisect against, so
+it is included or excluded whole. Same for a file rewritten so completely that
+no line survives. This is fundamental, not a setting.
 
-**Binary files and mode changes cannot be split.** They are included or
-excluded whole.
+**Binary files and mode changes cannot be split.** Included or excluded whole.
 
 **It needs a fast, deterministic test.** The search runs your test command
 several times. Point it at the single failing test, not the whole suite.
 
-**A flaky test will produce a wrong answer confidently.** whodunit trusts the
-exit code. If your test fails intermittently, the result is meaningless.
+**A flaky test produces a confident wrong answer.** whodunit trusts the exit
+code. If your test fails intermittently, the result is meaningless.
+
+## A note on context lines
+
+Git merges hunks whose context windows overlap, so the `--context` setting
+decides how finely a change can be split. This matters more than it sounds.
+
+Thirty independent edits to thirty adjacent functions:
+
+| Context | Hunks |
+|---|---|
+| `-U3` (Git's default) | 1 |
+| `-U1` (whodunit's default) | 30 |
+
+At Git's default the whole file is one unsplittable change. That is why
+whodunit defaults to `--context 1`.
+
+Zero is the floor: it splits no more finely than 1, and `git apply` rejects
+zero-context patches unless given `--unidiff-zero`, which disables the
+placement check that stops a hunk landing in the wrong place.
 
 ## Requirements
 

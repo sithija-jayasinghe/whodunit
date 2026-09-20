@@ -1,12 +1,22 @@
 import { exec, execOrThrow } from "../util/exec.js";
 
 export interface DiffOptions {
-  /** Lines of context per hunk. Fewer means finer granularity but less
-   *  reliable placement when hunks are applied in isolation. */
+  /**
+   * Lines of context per hunk.
+   *
+   * This is the single most important knob in the tool, because Git merges
+   * hunks whose context windows overlap. At the usual 3, thirty independent
+   * edits to thirty adjacent functions collapse into one unsplittable hunk;
+   * at 1 they stay thirty separate hunks. We default to 1.
+   *
+   * 0 splits no further than 1 does, and `git apply` rejects zero-context
+   * patches unless passed --unidiff-zero, which disables the placement check
+   * we rely on. So 1 is the floor.
+   */
   contextLines?: number;
 }
 
-export const DEFAULT_CONTEXT_LINES = 3;
+export const DEFAULT_CONTEXT_LINES = 1;
 
 /**
  * Produce the unified diff between two commits.

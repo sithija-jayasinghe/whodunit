@@ -25,8 +25,8 @@ COMMANDS
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
   --timeout <ms>    Kill a test run after this long. Default: ${DEFAULT_TEST_TIMEOUT_MS}
-  --context <n>     Diff context lines. Fewer splits changes more finely
-                    but places them less reliably. Default: 3
+  --context <n>     Diff context lines. Higher values make Git merge
+                    nearby changes into one hunk. Default: 1
   --link <path>     Extra gitignored path to link into the sandbox.
                     Repeatable. node_modules and .venv are linked already.
   -h, --help        Show this help
