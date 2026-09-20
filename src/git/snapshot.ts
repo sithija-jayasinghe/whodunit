@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { execOrThrow } from "../util/exec.js";
 import { hasCommits } from "./repo.js";
 
-const SNAPSHOT_REF_PREFIX = "refs/culprit/snapshots";
+const SNAPSHOT_REF_PREFIX = "refs/whodunit/snapshots";
 
 export interface Snapshot {
   /** Commit sha holding the captured tree. */
@@ -23,7 +23,7 @@ export interface Snapshot {
  * carefully staged index the user is not finished with.
  */
 export async function snapshotWorkingTree(repo: string, message: string): Promise<Snapshot> {
-  const scratch = await mkdtemp(join(tmpdir(), "culprit-index-"));
+  const scratch = await mkdtemp(join(tmpdir(), "whodunit-index-"));
   const indexFile = join(scratch, "index");
   const env = { GIT_INDEX_FILE: indexFile };
 

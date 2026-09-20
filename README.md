@@ -1,4 +1,4 @@
-# culprit
+# whodunit
 
 **Find which single change broke your test.**
 
@@ -6,10 +6,10 @@ An AI agent just changed 14 files. Your test is red. Instead of reading a diff
 you did not write, run:
 
 ```bash
-culprit -- npm test auth.test.ts
+whodunit -- npm test auth.test.ts
 ```
 
-culprit splits the change into individual hunks and binary-searches them against
+whodunit splits the change into individual hunks and binary-searches them against
 your failing test until it finds the smallest set that still reproduces the
 failure. It does not guess — it proves the answer by running your test.
 
@@ -36,10 +36,10 @@ Found it. 1 change out of 31:
 
 Claude Code and Cursor can undo a whole change. That throws away the thirteen
 good files to remove the one bad line, and it never tells you what was wrong.
-culprit keeps the good and isolates the bad.
+whodunit keeps the good and isolates the bad.
 
 An AI can also *read* the diff and guess the cause. Sometimes it is right.
-culprit runs the test, so when it names a change it has watched the test pass
+whodunit runs the test, so when it names a change it has watched the test pass
 without it and fail with it.
 
 ## How it works
@@ -61,13 +61,16 @@ Early. Built in phases:
 | Phase | What | Status |
 |---|---|---|
 | 1 | Snapshot, sandbox, test runner, `doctor` | done |
-| 2 | Diff splitter, subset apply | next |
-| 3 | ddmin search | |
+| 2 | Diff splitter, subset apply | done |
+| 3 | ddmin search | next |
 | 4 | Report and CLI polish | |
 | 5 | MCP server, so agents can call it | |
 
-Phase 1 is usable today via `culprit doctor`, which verifies that your baseline
-passes and your current tree fails — the precondition for any search.
+Two commands work today:
+
+- `whodunit doctor -- <test command>` verifies that your baseline passes and
+  your current tree fails — the precondition for any search.
+- `whodunit hunks` lists the individual changes the search will bisect.
 
 ## Install
 
@@ -91,27 +94,45 @@ npx tsx src/cli.ts doctor -- npm test
 ## Usage
 
 ```
-culprit [options] -- <test command>
+whodunit [options] -- <test command>
 
 COMMANDS
   doctor    Check that the baseline passes and the current tree fails.
-  prune     Delete every snapshot ref culprit created in this repo.
+  hunks     List the individual changes the search would bisect.
+  prune     Delete every snapshot ref whodunit created in this repo.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
   --timeout <ms>    Kill a test run after this long.
+  --context <n>     Diff context lines. Default: 3
   --link <path>     Extra gitignored path to link into the sandbox. Repeatable.
 ```
 
 ### The sandbox and your dependencies
 
 A fresh worktree has no `node_modules`, so a test command would fail for the
-boring reason that its dependencies are missing. culprit symlinks these in from
+boring reason that its dependencies are missing. whodunit symlinks these in from
 your real project: `node_modules`, `.venv`, `venv`, `vendor/bundle`. Add more
 with `--link`.
 
 These links are shared with the real project, so a test suite that *writes* to
 one of them writes through. Keep `--link` to dependency caches.
+
+## Known limits
+
+**A rewritten file is one hunk.** Git emits a single hunk when a change has no
+surviving context, so whodunit can narrow a full-file rewrite to the file but
+not to a line within it. Lowering `--context` helps only when some context
+survives.
+
+**Binary files and mode changes cannot be split.** They are included or
+excluded whole.
+
+**It needs a fast, deterministic test.** The search runs your test command
+several times. Point it at the single failing test, not the whole suite.
+
+**A flaky test will produce a wrong answer confidently.** whodunit trusts the
+exit code. If your test fails intermittently, the result is meaningless.
 
 ## Requirements
 

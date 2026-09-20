@@ -12,6 +12,16 @@ export interface Hunk {
   removed: number;
   /** Line count of the added side, for reporting. */
   added: number;
+  /** First line touched on the baseline side. */
+  oldStart: number;
+  /** First line touched on the changed side. */
+  newStart: number;
+  /**
+   * True when this "hunk" is really a whole-file change that cannot be split:
+   * a binary file, a mode change, or a pure rename. It can still be included
+   * or excluded, just not subdivided.
+   */
+  atomic: boolean;
 }
 
 /** The per-file header lines a hunk must be re-attached to in order to apply. */
@@ -20,6 +30,8 @@ export interface FilePatch {
   /** Everything before the first @@ hunk: "diff --git", mode lines, ---/+++. */
   header: string;
   hunks: Hunk[];
+  /** True when Git reported this file as binary. */
+  binary: boolean;
 }
 
 /** What running the test command told us about one candidate state. */
@@ -29,9 +41,9 @@ export type Outcome =
   /** Test failed the way we are hunting: this state is bad. */
   | "fail"
   /**
-   * We could not tell. The build broke, the command timed out, or the failure
-   * was a different failure than the one we started with. Delta debugging
-   * treats this as "skip" rather than folding it into pass or fail.
+   * We could not tell. The patch would not apply, the build broke, or the
+   * command timed out. Delta debugging treats this as "skip" rather than
+   * folding it into pass or fail.
    */
   | "unresolved";
 

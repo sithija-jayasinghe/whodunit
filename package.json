@@ -1,11 +1,11 @@
 {
-  "name": "culprit",
+  "name": "whodunit",
   "version": "0.0.1",
   "description": "Find which single change broke your test. Binary-searches a diff against a failing test until it proves the culprit.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "culprit": "dist/cli.js"
+    "whodunit": "dist/cli.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,10 +16,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "keywords": [
     "debugging",

@@ -41,7 +41,7 @@ export interface Sandbox {
 /**
  * Check `commit` out into a throwaway worktree under the system temp dir.
  *
- * Everything culprit does to candidate states happens in here. The user's real
+ * Everything whodunit does to candidate states happens in here. The user's real
  * working tree is never modified, which is the property that makes the tool
  * safe to run on uncommitted work.
  */
@@ -50,7 +50,7 @@ export async function createSandbox(
   commit: string,
   options: SandboxOptions = {},
 ): Promise<Sandbox> {
-  const parent = await mkdtemp(join(tmpdir(), "culprit-"));
+  const parent = await mkdtemp(join(tmpdir(), "whodunit-"));
   // `git worktree add` insists on creating the leaf directory itself.
   const path = join(parent, "work");
 

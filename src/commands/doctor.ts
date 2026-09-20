@@ -41,7 +41,7 @@ export async function checkPreconditions(options: {
   const dirty = await isDirty(repo);
 
   onStep(`Snapshotting working tree`);
-  const snapshot = await snapshotWorkingTree(repo, "culprit: working tree snapshot");
+  const snapshot = await snapshotWorkingTree(repo, "whodunit: working tree snapshot");
 
   onStep(`Testing baseline (${baselineRef} ${baselineCommit.slice(0, 7)})`);
   const baselineSandbox = await createSandbox(repo, baselineCommit, { link });

@@ -2,6 +2,7 @@
 import { parseArgs } from "node:util";
 
 import { checkPreconditions } from "./commands/doctor.js";
+import { listHunks, formatHunkListing } from "./commands/hunks.js";
 import { pruneSnapshots } from "./git/snapshot.js";
 import { repoRoot } from "./git/repo.js";
 import { DEFAULT_TEST_TIMEOUT_MS } from "./runner/test.js";
@@ -9,28 +10,32 @@ import type { TestResult } from "./types.js";
 
 const VERSION = "0.0.1";
 
-const HELP = `culprit ${VERSION}
+const HELP = `whodunit ${VERSION}
 Find which single change broke your test.
 
 USAGE
-  culprit [options] -- <test command>
+  whodunit [options] -- <test command>
 
 COMMANDS
   doctor    Check that the baseline passes and the current tree fails,
             without searching. Use this first.
-  prune     Delete every snapshot ref culprit has created in this repo.
+  hunks     List the individual changes the search would bisect.
+  prune     Delete every snapshot ref whodunit has created in this repo.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
   --timeout <ms>    Kill a test run after this long. Default: ${DEFAULT_TEST_TIMEOUT_MS}
+  --context <n>     Diff context lines. Fewer splits changes more finely
+                    but places them less reliably. Default: 3
   --link <path>     Extra gitignored path to link into the sandbox.
                     Repeatable. node_modules and .venv are linked already.
   -h, --help        Show this help
   -v, --version     Show version
 
 EXAMPLES
-  culprit doctor -- npm test
-  culprit doctor --since HEAD~1 -- npx vitest run auth.test.ts
+  whodunit hunks
+  whodunit doctor -- npm test
+  whodunit doctor --since HEAD~1 -- npx vitest run auth.test.ts
 `;
 
 /** Split argv at the first bare "--" so the test command stays intact. */
@@ -58,6 +63,7 @@ async function main(argv: string[]): Promise<number> {
       since: { type: "string", default: "HEAD" },
       timeout: { type: "string" },
       link: { type: "string", multiple: true, default: [] },
+      context: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -81,8 +87,19 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (command === "hunks") {
+    const contextLines = values.context === undefined ? undefined : Number(values.context);
+    if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0)) {
+      process.stderr.write("--context must be a non-negative whole number.\n");
+      return 2;
+    }
+    const listing = await listHunks({ repo, baselineRef: values.since, contextLines });
+    process.stdout.write(formatHunkListing(listing));
+    return listing.hunks.length > 0 ? 0 : 1;
+  }
+
   if (testCommand.length === 0) {
-    process.stderr.write("No test command given. Put it after --, e.g. culprit doctor -- npm test\n");
+    process.stderr.write("No test command given. Put it after --, e.g. whodunit doctor -- npm test\n");
     return 2;
   }
 
@@ -123,7 +140,7 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "run") {
     process.stderr.write(
-      "The search is not built yet (phases 2 and 3).\nRun `culprit doctor -- <test command>` to verify the setup works.\n",
+      "The search is not built yet (phases 2 and 3).\nRun `whodunit doctor -- <test command>` to verify the setup works.\n",
     );
     return 3;
   }
@@ -138,6 +155,6 @@ main(process.argv.slice(2))
   })
   .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`culprit: ${message}\n`);
+    process.stderr.write(`whodunit: ${message}\n`);
     process.exitCode = 1;
   });

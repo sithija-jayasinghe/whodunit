@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Create a throwaway repo with a known regression, for testing culprit by hand.
+# Create a throwaway repo with a known regression, for testing whodunit by hand.
 #
-#   ./test/make-fixture.sh            -> creates /tmp/culprit-fixture
+#   ./test/make-fixture.sh            -> creates /tmp/whodunit-fixture
 #   ./test/make-fixture.sh /some/path -> creates it there
 #
 # The repo ends up with a passing commit at HEAD and a broken working tree,
-# which is exactly the state culprit is built to investigate.
+# which is exactly the state whodunit is built to investigate.
 set -euo pipefail
 
 # Resolve the repo root before we cd away from it.
-CULPRIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WHODUNIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-DEST="${1:-/tmp/culprit-fixture}"
+DEST="${1:-/tmp/whodunit-fixture}"
 rm -rf "$DEST"
 mkdir -p "$DEST"
 cd "$DEST"
 
 git init -q .
 git config user.email fixture@example.com
-git config user.name "culprit fixture"
+git config user.name "whodunit fixture"
 
 echo '{"type":"module"}' > package.json
 
@@ -77,4 +77,4 @@ echo "Fixture ready at $DEST"
 echo
 echo "Try:"
 echo "  cd $DEST"
-echo "  node $CULPRIT_ROOT/dist/cli.js doctor -- node test.js"
+echo "  node $WHODUNIT_ROOT/dist/cli.js doctor -- node test.js"

@@ -15,7 +15,7 @@ export const DEFAULT_TEST_TIMEOUT_MS = 10 * 60 * 1000;
  *
  * The contract is deliberately narrow: exit code 0 means the state is good,
  * any other exit code means it is bad, and a timeout means we could not tell.
- * That is all culprit needs, and it is why the tool works with any language
+ * That is all whodunit needs, and it is why the tool works with any language
  * and any test runner.
  */
 export async function runTest(
