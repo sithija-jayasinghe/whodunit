@@ -62,15 +62,18 @@ Early. Built in phases:
 |---|---|---|
 | 1 | Snapshot, sandbox, test runner, `doctor` | done |
 | 2 | Diff splitter, subset apply | done |
-| 3 | ddmin search | next |
-| 4 | Report and CLI polish | |
+| 3 | ddmin search | done |
+| 4 | Report and CLI polish | mostly |
 | 5 | MCP server, so agents can call it | |
 
-Two commands work today:
+The search works today:
 
-- `whodunit doctor -- <test command>` verifies that your baseline passes and
-  your current tree fails — the precondition for any search.
-- `whodunit hunks` lists the individual changes the search will bisect.
+```bash
+whodunit -- node test.js
+```
+
+`whodunit hunks` lists the changes it would bisect, and
+`whodunit doctor -- <test command>` checks the preconditions without searching.
 
 ## Install
 
@@ -131,6 +134,22 @@ several times. Point it at the single failing test, not the whole suite.
 
 **A flaky test produces a confident wrong answer.** whodunit trusts the exit
 code. If your test fails intermittently, the result is meaningless.
+
+## How many test runs it takes
+
+One culprit is cheap. Several that only fail together are not — ddmin is
+quadratic in the worst case, which is why there is a probe budget.
+
+| Changes | Culprits | Test runs |
+|---|---|---|
+| 37 | 1 | 9 |
+| 50 | 1 | 7 |
+| 100 | 1 | 11 |
+| 30 | 2, interacting | 32 |
+| 100 | 2, interacting | 46 |
+
+When the budget runs out you still get a real failing set, reported as
+"narrowed to" rather than "found it", because it was not proven minimal.
 
 ## A note on context lines
 

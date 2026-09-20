@@ -11,3 +11,8 @@ export { parseDiff, collectHunks } from "./diff/parse.js";
 export { buildPatch, applySubset, resetSandbox } from "./diff/apply.js";
 export { diffCommits, applyPatch, resetWorktree, DEFAULT_CONTEXT_LINES } from "./git/diff.js";
 export type { PreconditionReport } from "./commands/doctor.js";
+export { search, DEFAULT_MAX_PROBES } from "./commands/search.js";
+export type { SearchReport } from "./commands/search.js";
+export { ddmin } from "./search/ddmin.js";
+export type { Probe, ProbeEvent, SearchResult } from "./search/ddmin.js";
+export { formatCulprit } from "./report/format.js";

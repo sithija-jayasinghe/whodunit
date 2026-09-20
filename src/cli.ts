@@ -3,6 +3,8 @@ import { parseArgs } from "node:util";
 
 import { checkPreconditions } from "./commands/doctor.js";
 import { listHunks, formatHunkListing } from "./commands/hunks.js";
+import { search, DEFAULT_MAX_PROBES } from "./commands/search.js";
+import { formatCulprit } from "./report/format.js";
 import { pruneSnapshots } from "./git/snapshot.js";
 import { repoRoot } from "./git/repo.js";
 import { DEFAULT_TEST_TIMEOUT_MS } from "./runner/test.js";
@@ -27,6 +29,7 @@ OPTIONS
   --timeout <ms>    Kill a test run after this long. Default: ${DEFAULT_TEST_TIMEOUT_MS}
   --context <n>     Diff context lines. Higher values make Git merge
                     nearby changes into one hunk. Default: 1
+  --max-probes <n>  Give up after this many test runs. Default: ${DEFAULT_MAX_PROBES}
   --link <path>     Extra gitignored path to link into the sandbox.
                     Repeatable. node_modules and .venv are linked already.
   -h, --help        Show this help
@@ -64,6 +67,7 @@ async function main(argv: string[]): Promise<number> {
       timeout: { type: "string" },
       link: { type: "string", multiple: true, default: [] },
       context: { type: "string" },
+      "max-probes": { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -139,10 +143,53 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "run") {
-    process.stderr.write(
-      "The search is not built yet (phases 2 and 3).\nRun `whodunit doctor -- <test command>` to verify the setup works.\n",
+    const contextLines = values.context === undefined ? undefined : Number(values.context);
+    if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0)) {
+      process.stderr.write("--context must be a non-negative whole number.\n");
+      return 2;
+    }
+    const maxProbes =
+      values["max-probes"] === undefined ? undefined : Number(values["max-probes"]);
+    if (maxProbes !== undefined && (!Number.isInteger(maxProbes) || maxProbes < 1)) {
+      process.stderr.write("--max-probes must be a whole number of at least 1.\n");
+      return 2;
+    }
+
+    const report = await search({
+      repo,
+      baselineRef: values.since,
+      testCommand,
+      contextLines,
+      timeoutMs,
+      maxProbes,
+      link: values.link,
+      onStep: (message) => process.stdout.write(`  ${message}...\n`),
+      onProbe: (event) => {
+        if (event.cached) return;
+        const label = event.outcome.toUpperCase();
+        process.stdout.write(
+          `    [${String(event.probe).padStart(2)}]  ` +
+            `${String(event.subset.length).padStart(3)} of ${String(event.of).padEnd(3)}  ${label}\n`,
+        );
+      },
+    });
+
+    if (!report.searchable || !report.result) {
+      process.stdout.write(`\n  CANNOT SEARCH  ${report.reason}\n\n`);
+      return 1;
+    }
+
+    process.stdout.write(
+      formatCulprit({
+        culprits: report.result.culprits,
+        patches: report.patches,
+        total: report.hunks.length,
+        probes: report.result.probes,
+        minimal: report.result.minimal,
+        elapsedMs: report.elapsedMs,
+      }),
     );
-    return 3;
+    return 0;
   }
 
   process.stderr.write(`Unknown command: ${command}\n`);
