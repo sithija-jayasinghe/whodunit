@@ -1,0 +1,39 @@
+{
+  "name": "culprit",
+  "version": "0.0.1",
+  "description": "Find which single change broke your test. Binary-searches a diff against a failing test until it proves the culprit.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "culprit": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "debugging",
+    "delta-debugging",
+    "bisect",
+    "git",
+    "testing",
+    "ai",
+    "regression"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
