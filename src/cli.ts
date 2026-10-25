@@ -8,7 +8,7 @@ import { search, DEFAULT_MAX_PROBES } from "./commands/search.js";
 import { formatCulprit } from "./report/format.js";
 import { pruneSnapshots } from "./git/snapshot.js";
 import { repoRoot } from "./git/repo.js";
-import { DEFAULT_TEST_TIMEOUT_MS } from "./runner/test.js";
+import { DEFAULT_TEST_TIMEOUT_MS, SKIP_EXIT_CODE } from "./runner/test.js";
 import type { TestResult } from "./types.js";
 
 // package.json sits one level above both src/cli.ts and dist/cli.js, and npm
@@ -35,6 +35,10 @@ OPTIONS
   --context <n>     Diff context lines. Higher values make Git merge
                     nearby changes into one hunk. Default: 1
   --max-probes <n>  Give up after this many test runs. Default: ${DEFAULT_MAX_PROBES}
+  --skip-exit-code <n>
+                    Treat this exit code as "cannot test this state", e.g.
+                    when the build fails. Repeatable. ${SKIP_EXIT_CODE} always counts,
+                    as in git bisect run.
   --link <path>     Extra gitignored path to link into the sandbox.
                     Repeatable. node_modules and .venv are linked already.
   -h, --help        Show this help
@@ -73,6 +77,7 @@ async function main(argv: string[]): Promise<number> {
       link: { type: "string", multiple: true, default: [] },
       context: { type: "string" },
       "max-probes": { type: "string" },
+      "skip-exit-code": { type: "string", multiple: true, default: [] },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -118,12 +123,20 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
 
+  const extraSkipCodes = values["skip-exit-code"].map(Number);
+  if (extraSkipCodes.some((code) => !Number.isInteger(code) || code < 1 || code > 255)) {
+    process.stderr.write("--skip-exit-code must be a whole number from 1 to 255.\n");
+    return 2;
+  }
+  const skipExitCodes = [SKIP_EXIT_CODE, ...extraSkipCodes];
+
   if (command === "doctor") {
     const report = await checkPreconditions({
       repo,
       baselineRef: values.since,
       testCommand,
       timeoutMs,
+      skipExitCodes,
       link: values.link,
       onStep: (message) => process.stdout.write(`  ${message}...\n`),
     });
@@ -166,6 +179,7 @@ async function main(argv: string[]): Promise<number> {
       testCommand,
       contextLines,
       timeoutMs,
+      skipExitCodes,
       maxProbes,
       link: values.link,
       onStep: (message) => process.stdout.write(`  ${message}...\n`),

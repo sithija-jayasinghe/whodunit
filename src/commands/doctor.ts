@@ -1,7 +1,7 @@
 import { createSandbox } from "../git/worktree.js";
 import { snapshotWorkingTree } from "../git/snapshot.js";
 import { isDirty, resolveRef } from "../git/repo.js";
-import { runTest } from "../runner/test.js";
+import { explainUnresolved, runTest } from "../runner/test.js";
 import type { TestResult } from "../types.js";
 
 export interface PreconditionReport {
@@ -32,10 +32,13 @@ export async function checkPreconditions(options: {
   baselineRef: string;
   testCommand: readonly string[];
   timeoutMs?: number;
+  /** Exit codes that mean "cannot judge this state". Default: 125. */
+  skipExitCodes?: readonly number[];
   link?: readonly string[];
   onStep?: (message: string) => void;
 }): Promise<PreconditionReport> {
-  const { repo, baselineRef, testCommand, timeoutMs, link, onStep = () => {} } = options;
+  const { repo, baselineRef, testCommand, timeoutMs, skipExitCodes, link, onStep = () => {} } =
+    options;
 
   const baselineCommit = await resolveRef(repo, baselineRef);
   const dirty = await isDirty(repo);
@@ -47,7 +50,11 @@ export async function checkPreconditions(options: {
   const baselineSandbox = await createSandbox(repo, baselineCommit, { link });
   let baseline: TestResult;
   try {
-    baseline = await runTest(testCommand, { cwd: baselineSandbox.path, timeoutMs });
+    baseline = await runTest(testCommand, {
+      cwd: baselineSandbox.path,
+      timeoutMs,
+      skipExitCodes,
+    });
   } finally {
     await baselineSandbox.dispose();
   }
@@ -58,7 +65,11 @@ export async function checkPreconditions(options: {
   let linked: string[];
   try {
     linked = currentSandbox.linked;
-    current = await runTest(testCommand, { cwd: currentSandbox.path, timeoutMs });
+    current = await runTest(testCommand, {
+      cwd: currentSandbox.path,
+      timeoutMs,
+      skipExitCodes,
+    });
   } finally {
     await currentSandbox.dispose();
   }
@@ -68,12 +79,12 @@ export async function checkPreconditions(options: {
   if (baseline.outcome !== "pass") {
     reason =
       baseline.outcome === "unresolved"
-        ? "The baseline test timed out, so there is no known-good state to compare against."
+        ? explainUnresolved("baseline", baseline)
         : "The test already fails at the baseline, so the change did not break it.";
   } else if (current.outcome === "pass") {
     reason = "The test passes on the current tree. Nothing is broken.";
   } else if (current.outcome === "unresolved") {
-    reason = "The current test timed out. Narrow the test command or raise --timeout.";
+    reason = explainUnresolved("current", current);
   } else {
     reason = "Baseline passes and the current tree fails. Ready to search.";
     searchable = true;

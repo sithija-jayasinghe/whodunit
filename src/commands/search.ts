@@ -1,6 +1,6 @@
 import { createSandbox } from "../git/worktree.js";
 import { applySubset } from "../diff/apply.js";
-import { runTest } from "../runner/test.js";
+import { explainUnresolved, runTest } from "../runner/test.js";
 import { ddmin, type Probe, type ProbeEvent, type SearchResult } from "../search/ddmin.js";
 import { listHunks } from "./hunks.js";
 import type { FilePatch, Hunk, TestResult } from "../types.js";
@@ -13,6 +13,8 @@ export interface SearchOptions {
   testCommand: readonly string[];
   contextLines?: number;
   timeoutMs?: number;
+  /** Exit codes that mean "cannot judge this state". Default: 125. */
+  skipExitCodes?: readonly number[];
   maxProbes?: number;
   link?: readonly string[];
   onStep?: (message: string) => void;
@@ -78,24 +80,24 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
   const sandbox = await createSandbox(repo, baselineCommit, { link: options.link });
   const preserve = sandbox.linked;
 
+  const run = () =>
+    runTest(testCommand, {
+      cwd: sandbox.path,
+      timeoutMs: options.timeoutMs,
+      skipExitCodes: options.skipExitCodes,
+    });
+
   const probe: Probe = async (subset) => {
     const applied = await applySubset(sandbox.path, patches, subset, preserve);
     // A rejected patch is not a reachable state, so we cannot judge it.
     if (!applied.applied) return "unresolved";
-    const run = await runTest(testCommand, {
-      cwd: sandbox.path,
-      timeoutMs: options.timeoutMs,
-    });
-    return run.outcome;
+    return (await run()).outcome;
   };
 
   try {
     onStep(`Testing baseline (${hunks.length} changes to search)`);
     await applySubset(sandbox.path, patches, [], preserve);
-    const baseline = await runTest(testCommand, {
-      cwd: sandbox.path,
-      timeoutMs: options.timeoutMs,
-    });
+    const baseline = await run();
 
     if (baseline.outcome !== "pass") {
       return {
@@ -104,7 +106,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         searchable: false,
         reason:
           baseline.outcome === "unresolved"
-            ? "The baseline test timed out, so there is no known-good state to compare against."
+            ? explainUnresolved("baseline", baseline)
             : "The test already fails at the baseline, so these changes did not break it.",
         elapsedMs: Date.now() - startedAt,
       };
@@ -121,10 +123,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         elapsedMs: Date.now() - startedAt,
       };
     }
-    const current = await runTest(testCommand, {
-      cwd: sandbox.path,
-      timeoutMs: options.timeoutMs,
-    });
+    const current = await run();
 
     if (current.outcome !== "fail") {
       return {
@@ -135,7 +134,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         reason:
           current.outcome === "pass"
             ? "The test passes with every change applied. Nothing is broken."
-            : "The current test timed out. Narrow the test command or raise --timeout.",
+            : explainUnresolved("current", current),
         elapsedMs: Date.now() - startedAt,
       };
     }

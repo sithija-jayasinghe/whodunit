@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -155,4 +155,56 @@ test("a probe budget still returns a real failing set", async () => {
   assert.equal(report.result.probes, 2, "the budget must actually bind");
   assert.equal(report.result.minimal, false, "must not claim minimality it did not prove");
   assert.ok(report.result.culprits.length > 0);
+});
+
+test("a hunk that only breaks the build is skipped, not blamed", async () => {
+  // run.js stands in for a build step: when the modules will not even load,
+  // it exits 125 to say "cannot judge this state".
+  await commitGreen();
+  await writeFile(
+    join(repo, "run.js"),
+    `try {
+  await import("./test.js");
+} catch (error) {
+  console.error(error.message);
+  process.exit(125);
+}
+`,
+  );
+  await execOrThrow("git", ["add", "-A"], { cwd: repo });
+  await execOrThrow("git", ["commit", "-qm", "add build wrapper"], { cwd: repo });
+
+  // mod1 gains an export that mod5 starts importing, and mod6 is the real
+  // regression. Testing mod5's hunk without mod1's fails to link. Counting
+  // that as a failure would blame mod5, which broke nothing.
+  await writeProject(6, true);
+  const mod1 = join(repo, "src", "mod1.js");
+  await writeFile(mod1, `export const SCALE = 1;\n${await readFile(mod1, "utf8")}`);
+  const mod5 = join(repo, "src", "mod5.js");
+  await writeFile(
+    mod5,
+    `import { SCALE } from "./mod1.js";\n` +
+      (await readFile(mod5, "utf8")).replace("input * 50", "input * 50 * SCALE"),
+  );
+
+  const outcomes: string[] = [];
+  const report = await search({
+    repo,
+    baselineRef: "HEAD",
+    testCommand: ["node", "run.js"],
+    onProbe: (event) => outcomes.push(event.outcome),
+  });
+
+  assert.equal(report.searchable, true, report.reason);
+  assert.ok(report.result);
+  assert.ok(outcomes.includes("unresolved"), "no probe hit the broken build");
+  assert.deepEqual(
+    report.result.culprits.map((hunk) => hunk.file),
+    ["src/mod6.js"],
+  );
+
+  await commitGreen();
+  await rm(join(repo, "run.js"));
+  await execOrThrow("git", ["add", "-A"], { cwd: repo });
+  await execOrThrow("git", ["commit", "-qm", "drop build wrapper"], { cwd: repo });
 });

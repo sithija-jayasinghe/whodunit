@@ -109,7 +109,26 @@ OPTIONS
   --timeout <ms>    Kill a test run after this long.
   --context <n>     Diff context lines. Default: 3
   --link <path>     Extra gitignored path to link into the sandbox. Repeatable.
+  --skip-exit-code <n>
+                    Exit code meaning "cannot test this state". Repeatable.
+                    125 always counts.
 ```
+
+### When a combination does not build
+
+Leaving some hunks out can break the build — a function used but no longer
+defined. That exits non-zero just like a real failure, and the search would
+blame the hunk that broke the *build* instead of the one that broke the *test*.
+
+Exit **125** to say "cannot judge this state", the same convention as
+`git bisect run`:
+
+```bash
+whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
+```
+
+If your tool already uses a different exit code for build errors, pass it with
+`--skip-exit-code`. A timeout also counts as "cannot judge".
 
 ### The sandbox and your dependencies
 

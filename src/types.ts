@@ -41,9 +41,10 @@ export type Outcome =
   /** Test failed the way we are hunting: this state is bad. */
   | "fail"
   /**
-   * We could not tell. The patch would not apply, the build broke, or the
-   * command timed out. Delta debugging treats this as "skip" rather than
-   * folding it into pass or fail.
+   * We could not tell. The patch would not apply, the command timed out, or
+   * it exited with a skip code (125 by default) to say the build broke.
+   * Delta debugging treats this as "skip" rather than folding it into pass or
+   * fail.
    */
   | "unresolved";
 
