@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { execOrThrow } from "../src/util/exec.js";
-import { search } from "../src/commands/search.js";
+import { search, type RunEvent } from "../src/commands/search.js";
 import { listHunks } from "../src/commands/hunks.js";
 import { checkPreconditions } from "../src/commands/doctor.js";
 
@@ -230,4 +230,31 @@ test("no snapshot refs are left behind by any command", async () => {
   const report = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
   assert.equal(report.result?.culprits[0]?.file, "src/mod6.js");
   assert.equal(await snapshotRefs(), "", "search left a ref");
+});
+
+test("every test run is reported with its output, and all of them are counted", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+
+  const runs: RunEvent[] = [];
+  const report = await search({
+    repo,
+    baselineRef: "HEAD",
+    testCommand: TEST_COMMAND,
+    onRun: (event) => runs.push(event),
+  });
+
+  assert.ok(report.result);
+  assert.deepEqual(
+    runs.slice(0, 2).map((event) => event.kind),
+    ["baseline", "current"],
+  );
+  const [baseline, current] = runs;
+  assert.ok(baseline?.kind === "baseline" && baseline.result.stdout.includes("ok"));
+  assert.ok(current?.kind === "current" && current.result.stderr.includes("FAIL calc6"));
+
+  const probes = runs.filter((event) => event.kind === "probe");
+  assert.equal(probes.length, report.result.probes);
+  // The two precondition runs happened too, so they belong in the count.
+  assert.equal(report.testRuns, report.result.probes + 2);
 });

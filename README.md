@@ -112,6 +112,7 @@ OPTIONS
   --skip-exit-code <n>
                     Exit code meaning "cannot test this state". Repeatable.
                     125 always counts.
+  --verbose         Print the output of every test run.
 ```
 
 ### When a combination does not build

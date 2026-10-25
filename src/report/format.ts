@@ -23,7 +23,8 @@ export interface CulpritReport {
   patches: readonly FilePatch[];
   /** Total hunks the search started from. */
   total: number;
-  probes: number;
+  /** Every run of the test command, the two precondition checks included. */
+  testRuns: number;
   minimal: boolean;
   elapsedMs: number;
 }
@@ -37,7 +38,7 @@ export interface CulpritReport {
  * and it says so rather than overclaiming.
  */
 export function formatCulprit(report: CulpritReport): string {
-  const { culprits, patches, total, probes, minimal, elapsedMs } = report;
+  const { culprits, patches, total, testRuns, minimal, elapsedMs } = report;
   const byFile = new Map(patches.map((patch) => [patch.file, patch]));
   const seconds = (elapsedMs / 1000).toFixed(1);
   const lines: string[] = [""];
@@ -77,6 +78,22 @@ export function formatCulprit(report: CulpritReport): string {
     lines.push("  Re-run with a higher --max-probes to narrow it further.");
   }
 
-  lines.push(`  ${probes} test run${probes === 1 ? "" : "s"} in ${seconds}s.`, "");
+  lines.push(`  ${testRuns} test run${testRuns === 1 ? "" : "s"} in ${seconds}s.`, "");
   return lines.join("\n");
+}
+
+/**
+ * Render a test run's output for --verbose, indented under the line that
+ * introduced it so it reads as belonging to that run.
+ *
+ * stdout and stderr are captured separately, so they cannot be interleaved in
+ * their original order; stdout comes first.
+ */
+export function formatRunOutput(output: { stdout: string; stderr: string }, indent: string): string {
+  const text = [output.stdout, output.stderr]
+    .map((part) => part.replace(/\s+$/, ""))
+    .filter((part) => part !== "")
+    .join("\n");
+  const lines = text === "" ? ["(no output)"] : text.split("\n");
+  return lines.map((line) => `${indent}| ${line}`.trimEnd()).join("\n") + "\n";
 }

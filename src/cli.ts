@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { checkPreconditions } from "./commands/doctor.js";
 import { listHunks, formatHunkListing } from "./commands/hunks.js";
 import { search, DEFAULT_MAX_PROBES } from "./commands/search.js";
-import { formatCulprit } from "./report/format.js";
+import { formatCulprit, formatRunOutput } from "./report/format.js";
 import { pruneSnapshots } from "./git/snapshot.js";
 import { repoRoot } from "./git/repo.js";
 import { DEFAULT_TEST_TIMEOUT_MS, SKIP_EXIT_CODE } from "./runner/test.js";
@@ -35,13 +35,15 @@ OPTIONS
   --timeout <ms>    Kill a test run after this long. Default: ${DEFAULT_TEST_TIMEOUT_MS}
   --context <n>     Diff context lines. Higher values make Git merge
                     nearby changes into one hunk. Default: 1
-  --max-probes <n>  Give up after this many test runs. Default: ${DEFAULT_MAX_PROBES}
+  --max-probes <n>  Give up after this many search runs, not counting the
+                    two initial checks. Default: ${DEFAULT_MAX_PROBES}
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. ${SKIP_EXIT_CODE} always counts,
                     as in git bisect run.
   --link <path>     Extra gitignored path to link into the sandbox.
                     Repeatable. node_modules and .venv are linked already.
+  --verbose         Print the output of every test run.
   -h, --help        Show this help
   -v, --version     Show version
 
@@ -79,6 +81,7 @@ async function main(argv: string[]): Promise<number> {
       context: { type: "string" },
       "max-probes": { type: "string" },
       "skip-exit-code": { type: "string", multiple: true, default: [] },
+      verbose: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -152,7 +155,9 @@ async function main(argv: string[]): Promise<number> {
         `  linked      ${report.linked.length > 0 ? report.linked.join(", ") : "nothing"}`,
         ``,
         `  baseline    ${describe(report.baseline)}`,
+        ...(values.verbose ? [formatRunOutput(report.baseline, "              ").trimEnd()] : []),
         `  current     ${describe(report.current)}`,
+        ...(values.verbose ? [formatRunOutput(report.current, "              ").trimEnd()] : []),
         ``,
         `  ${report.searchable ? "READY" : "CANNOT SEARCH"}  ${report.reason}`,
         ``,
@@ -174,6 +179,10 @@ async function main(argv: string[]): Promise<number> {
       return 2;
     }
 
+    // A probe's output arrives just before the line that announces it, so
+    // hold it until that line has been printed.
+    let pendingOutput: string | undefined;
+
     const report = await search({
       repo,
       baselineRef: values.since,
@@ -184,6 +193,20 @@ async function main(argv: string[]): Promise<number> {
       maxProbes,
       link: values.link,
       onStep: (message) => process.stdout.write(`  ${message}...\n`),
+      onRun: (event) => {
+        if (!values.verbose) return;
+        if (event.kind === "rejected") {
+          pendingOutput = formatRunOutput(
+            { stdout: "patch did not apply, so the test did not run", stderr: event.stderr },
+            "           ",
+          );
+        } else if (event.kind === "probe") {
+          pendingOutput = formatRunOutput(event.result, "           ");
+        } else {
+          process.stdout.write(`    ${event.kind.padEnd(9)}${describe(event.result)}\n`);
+          process.stdout.write(formatRunOutput(event.result, "           "));
+        }
+      },
       onProbe: (event) => {
         if (event.cached) return;
         const label = event.outcome.toUpperCase();
@@ -191,6 +214,8 @@ async function main(argv: string[]): Promise<number> {
           `    [${String(event.probe).padStart(2)}]  ` +
             `${String(event.subset.length).padStart(3)} of ${String(event.of).padEnd(3)}  ${label}\n`,
         );
+        if (pendingOutput !== undefined) process.stdout.write(pendingOutput);
+        pendingOutput = undefined;
       },
     });
 
@@ -204,7 +229,7 @@ async function main(argv: string[]): Promise<number> {
         culprits: report.result.culprits,
         patches: report.patches,
         total: report.hunks.length,
-        probes: report.result.probes,
+        testRuns: report.testRuns,
         minimal: report.result.minimal,
         elapsedMs: report.elapsedMs,
       }),

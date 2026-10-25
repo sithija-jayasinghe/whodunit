@@ -19,7 +19,24 @@ export interface SearchOptions {
   link?: readonly string[];
   onStep?: (message: string) => void;
   onProbe?: (event: ProbeEvent) => void;
+  /** Called after every test run, with its full output, and for every subset
+   *  whose patch would not apply. Fires before the matching onProbe. */
+  onRun?: (event: RunEvent) => void;
 }
+
+export type RunEvent =
+  | {
+      /** Which run: the two precondition checks, or a search probe. */
+      kind: "baseline" | "current" | "probe";
+      subset: readonly Hunk[];
+      result: TestResult;
+    }
+  | {
+      /** The subset's patch was rejected, so the test never ran. */
+      kind: "rejected";
+      subset: readonly Hunk[];
+      stderr: string;
+    };
 
 export interface SearchReport {
   baselineCommit: string;
@@ -34,6 +51,8 @@ export interface SearchReport {
   result?: SearchResult;
   searchable: boolean;
   reason: string;
+  /** Every time the test command ran, preconditions included. */
+  testRuns: number;
   elapsedMs: number;
 }
 
@@ -60,74 +79,79 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
   });
   const { patches, hunks, baselineCommit, snapshotCommit } = listing;
 
-  const base = {
+  let testRuns = 0;
+  const finish = (
+    outcome: Omit<SearchReport, keyof typeof listing | "testRuns" | "elapsedMs">,
+  ): SearchReport => ({
     baselineCommit,
     snapshotCommit,
     patches,
     hunks,
-    elapsedMs: 0,
-  };
+    ...outcome,
+    testRuns,
+    elapsedMs: Date.now() - startedAt,
+  });
 
   if (hunks.length === 0) {
-    return {
-      ...base,
+    return finish({
       searchable: false,
       reason: "No changes against the baseline. Nothing to search.",
-      elapsedMs: Date.now() - startedAt,
-    };
+    });
   }
 
   const sandbox = await createSandbox(repo, baselineCommit, { link: options.link });
   const preserve = sandbox.linked;
 
-  const run = () =>
-    runTest(testCommand, {
+  const run = async (kind: "baseline" | "current" | "probe", subset: readonly Hunk[]) => {
+    testRuns++;
+    const result = await runTest(testCommand, {
       cwd: sandbox.path,
       timeoutMs: options.timeoutMs,
       skipExitCodes: options.skipExitCodes,
     });
+    options.onRun?.({ kind, subset, result });
+    return result;
+  };
 
   const probe: Probe = async (subset) => {
     const applied = await applySubset(sandbox.path, patches, subset, preserve);
     // A rejected patch is not a reachable state, so we cannot judge it.
-    if (!applied.applied) return "unresolved";
-    return (await run()).outcome;
+    if (!applied.applied) {
+      options.onRun?.({ kind: "rejected", subset, stderr: applied.stderr });
+      return "unresolved";
+    }
+    return (await run("probe", subset)).outcome;
   };
 
   try {
     onStep(`Testing baseline (${hunks.length} changes to search)`);
     await applySubset(sandbox.path, patches, [], preserve);
-    const baseline = await run();
+    const baseline = await run("baseline", []);
 
     if (baseline.outcome !== "pass") {
-      return {
-        ...base,
+      return finish({
         baseline,
         searchable: false,
         reason:
           baseline.outcome === "unresolved"
             ? explainUnresolved("baseline", baseline)
             : "The test already fails at the baseline, so these changes did not break it.",
-        elapsedMs: Date.now() - startedAt,
-      };
+      });
     }
 
     onStep("Confirming the current tree fails");
     const fullApplied = await applySubset(sandbox.path, patches, hunks, preserve);
     if (!fullApplied.applied) {
-      return {
-        ...base,
+      return finish({
         baseline,
         searchable: false,
         reason: `The full change set would not apply to the baseline: ${fullApplied.stderr.trim()}`,
-        elapsedMs: Date.now() - startedAt,
-      };
+      });
     }
-    const current = await run();
+    const current = await run("current", hunks);
 
     if (current.outcome !== "fail") {
-      return {
-        ...base,
+      return finish({
         baseline,
         current,
         searchable: false,
@@ -135,8 +159,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
           current.outcome === "pass"
             ? "The test passes with every change applied. Nothing is broken."
             : explainUnresolved("current", current),
-        elapsedMs: Date.now() - startedAt,
-      };
+      });
     }
 
     onStep("Searching");
@@ -149,8 +172,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       ],
     });
 
-    return {
-      ...base,
+    return finish({
       baseline,
       current,
       result,
@@ -158,8 +180,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       reason: result.minimal
         ? "Search completed."
         : "Probe budget reached before the set was proven minimal.",
-      elapsedMs: Date.now() - startedAt,
-    };
+    });
   } finally {
     await sandbox.dispose();
   }
