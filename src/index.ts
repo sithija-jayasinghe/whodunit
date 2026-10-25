@@ -16,3 +16,4 @@ export type { SearchReport, RunEvent } from "./commands/search.js";
 export { ddmin } from "./search/ddmin.js";
 export type { Probe, ProbeEvent, SearchResult } from "./search/ddmin.js";
 export { formatCulprit, formatRunOutput } from "./report/format.js";
+export { searchToJson, preconditionsToJson, hunksToJson, JSON_SCHEMA_VERSION } from "./report/json.js";

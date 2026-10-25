@@ -6,6 +6,7 @@ import { checkPreconditions } from "./commands/doctor.js";
 import { listHunks, formatHunkListing } from "./commands/hunks.js";
 import { search, DEFAULT_MAX_PROBES } from "./commands/search.js";
 import { formatCulprit, formatRunOutput } from "./report/format.js";
+import { hunksToJson, JSON_SCHEMA_VERSION, preconditionsToJson, searchToJson } from "./report/json.js";
 import { pruneSnapshots } from "./git/snapshot.js";
 import { repoRoot } from "./git/repo.js";
 import { DEFAULT_TEST_TIMEOUT_MS, SKIP_EXIT_CODE } from "./runner/test.js";
@@ -44,6 +45,8 @@ OPTIONS
   --link <path>     Extra gitignored path to link into the sandbox.
                     Repeatable. node_modules and .venv are linked already.
   --verbose         Print the output of every test run.
+  --json            Print one JSON object instead of text, for scripts and
+                    agents. With --verbose it includes test output.
   -h, --help        Show this help
   -v, --version     Show version
 
@@ -51,6 +54,7 @@ EXAMPLES
   whodunit hunks
   whodunit doctor -- npm test
   whodunit doctor --since HEAD~1 -- npx vitest run auth.test.ts
+  whodunit --json -- npm test auth.test.ts
 `;
 
 /** Split argv at the first bare "--" so the test command stays intact. */
@@ -68,8 +72,26 @@ function describe(result: TestResult): string {
   return `${label}  (${detail}, ${seconds}s)`;
 }
 
-async function main(argv: string[]): Promise<number> {
+/** Write `data` as the one JSON document on stdout. */
+function printJson(data: object): void {
+  process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
+}
+
+/**
+ * Report a usage or runtime error. In JSON mode it goes to stdout as JSON, so
+ * a caller parsing stdout always gets a document it can read.
+ */
+function reportError(message: string, json: boolean): void {
+  if (json) printJson({ schema: JSON_SCHEMA_VERSION, error: message });
+  else process.stderr.write(`${message}\n`);
+}
+
+async function main(argv: string[], json: boolean): Promise<number> {
   const { own, testCommand } = splitCommand(argv);
+  const fail = (message: string): number => {
+    reportError(message, json);
+    return 2;
+  };
 
   const { values, positionals } = parseArgs({
     args: own,
@@ -82,6 +104,7 @@ async function main(argv: string[]): Promise<number> {
       "max-probes": { type: "string" },
       "skip-exit-code": { type: "string", multiple: true, default: [] },
       verbose: { type: "boolean", default: false },
+      json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -101,6 +124,10 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "prune") {
     const removed = await pruneSnapshots(repo);
+    if (json) {
+      printJson({ schema: JSON_SCHEMA_VERSION, command: "prune", removed });
+      return 0;
+    }
     process.stdout.write(`Removed ${removed} snapshot ref${removed === 1 ? "" : "s"}.\n`);
     return 0;
   }
@@ -108,29 +135,26 @@ async function main(argv: string[]): Promise<number> {
   if (command === "hunks") {
     const contextLines = values.context === undefined ? undefined : Number(values.context);
     if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0)) {
-      process.stderr.write("--context must be a non-negative whole number.\n");
-      return 2;
+      return fail("--context must be a non-negative whole number.");
     }
     const listing = await listHunks({ repo, baselineRef: values.since, contextLines });
-    process.stdout.write(formatHunkListing(listing));
+    if (json) printJson(hunksToJson(listing));
+    else process.stdout.write(formatHunkListing(listing));
     return listing.hunks.length > 0 ? 0 : 1;
   }
 
   if (testCommand.length === 0) {
-    process.stderr.write("No test command given. Put it after --, e.g. whodunit doctor -- npm test\n");
-    return 2;
+    return fail("No test command given. Put it after --, e.g. whodunit doctor -- npm test");
   }
 
   const timeoutMs = values.timeout ? Number(values.timeout) : undefined;
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
-    process.stderr.write(`--timeout must be a positive number of milliseconds.\n`);
-    return 2;
+    return fail("--timeout must be a positive number of milliseconds.");
   }
 
   const extraSkipCodes = values["skip-exit-code"].map(Number);
   if (extraSkipCodes.some((code) => !Number.isInteger(code) || code < 1 || code > 255)) {
-    process.stderr.write("--skip-exit-code must be a whole number from 1 to 255.\n");
-    return 2;
+    return fail("--skip-exit-code must be a whole number from 1 to 255.");
   }
   const skipExitCodes = [SKIP_EXIT_CODE, ...extraSkipCodes];
 
@@ -142,8 +166,15 @@ async function main(argv: string[]): Promise<number> {
       timeoutMs,
       skipExitCodes,
       link: values.link,
-      onStep: (message) => process.stdout.write(`  ${message}...\n`),
+      onStep: (message) => {
+        if (!json) process.stdout.write(`  ${message}...\n`);
+      },
     });
+
+    if (json) {
+      printJson(preconditionsToJson(report, { verbose: values.verbose }));
+      return report.searchable ? 0 : 1;
+    }
 
     process.stdout.write(
       [
@@ -169,14 +200,12 @@ async function main(argv: string[]): Promise<number> {
   if (command === "run") {
     const contextLines = values.context === undefined ? undefined : Number(values.context);
     if (contextLines !== undefined && (!Number.isInteger(contextLines) || contextLines < 0)) {
-      process.stderr.write("--context must be a non-negative whole number.\n");
-      return 2;
+      return fail("--context must be a non-negative whole number.");
     }
     const maxProbes =
       values["max-probes"] === undefined ? undefined : Number(values["max-probes"]);
     if (maxProbes !== undefined && (!Number.isInteger(maxProbes) || maxProbes < 1)) {
-      process.stderr.write("--max-probes must be a whole number of at least 1.\n");
-      return 2;
+      return fail("--max-probes must be a whole number of at least 1.");
     }
 
     // A probe's output arrives just before the line that announces it, so
@@ -192,9 +221,11 @@ async function main(argv: string[]): Promise<number> {
       skipExitCodes,
       maxProbes,
       link: values.link,
-      onStep: (message) => process.stdout.write(`  ${message}...\n`),
+      onStep: (message) => {
+        if (!json) process.stdout.write(`  ${message}...\n`);
+      },
       onRun: (event) => {
-        if (!values.verbose) return;
+        if (!values.verbose || json) return;
         if (event.kind === "rejected") {
           pendingOutput = formatRunOutput(
             { stdout: "patch did not apply, so the test did not run", stderr: event.stderr },
@@ -208,7 +239,7 @@ async function main(argv: string[]): Promise<number> {
         }
       },
       onProbe: (event) => {
-        if (event.cached) return;
+        if (event.cached || json) return;
         const label = event.outcome.toUpperCase();
         process.stdout.write(
           `    [${String(event.probe).padStart(2)}]  ` +
@@ -218,6 +249,11 @@ async function main(argv: string[]): Promise<number> {
         pendingOutput = undefined;
       },
     });
+
+    if (json) {
+      printJson(searchToJson(report, { verbose: values.verbose }));
+      return report.searchable && report.result ? 0 : 1;
+    }
 
     if (!report.searchable || !report.result) {
       process.stdout.write(`\n  CANNOT SEARCH  ${report.reason}\n\n`);
@@ -237,16 +273,22 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  process.stderr.write(`Unknown command: ${command}\n`);
-  return 2;
+  return fail(`Unknown command: ${command}`);
 }
 
-main(process.argv.slice(2))
+const argv = process.argv.slice(2);
+// Known before parsing, so even a parse error can be reported as JSON.
+const json = splitCommand(argv).own.includes("--json");
+
+main(argv, json)
   .then((code) => {
     process.exitCode = code;
   })
   .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`whodunit: ${message}\n`);
-    process.exitCode = 1;
+    reportError(`whodunit: ${message}`, json);
+    // parseArgs rejects unknown or malformed options with an ERR_PARSE_ARGS_*
+    // code. That is bad usage, the same as any other invalid option.
+    const code = (error as { code?: unknown } | null)?.code;
+    process.exitCode = typeof code === "string" && code.startsWith("ERR_PARSE_ARGS") ? 2 : 1;
   });

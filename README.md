@@ -113,7 +113,39 @@ OPTIONS
                     Exit code meaning "cannot test this state". Repeatable.
                     125 always counts.
   --verbose         Print the output of every test run.
+  --json            Print one JSON object instead of text.
 ```
+
+### JSON output
+
+`--json` works with the search, `doctor` and `hunks`. stdout is then exactly one
+JSON document, so a script or an agent can parse it without scraping text:
+
+```bash
+whodunit --json -- npm test auth.test.ts
+```
+
+```json
+{
+  "schema": 1,
+  "command": "run",
+  "searchable": true,
+  "reason": "Search completed.",
+  "totalChanges": 31,
+  "culprits": [
+    { "file": "src/auth/token.ts", "line": 42, "added": 1, "removed": 1,
+      "patch": "@@ -41,3 +41,3 @@ ..." }
+  ],
+  "minimal": true,
+  "testRuns": 7
+}
+```
+
+Abridged: the full object also has the commits, timings and each hunk's id.
+Add `--verbose` to include the stdout and stderr of the baseline and current
+runs. Errors are JSON too (`{ "schema": 1, "error": "..." }`). Exit codes do not
+change: 0 found, 1 nothing to search, 2 bad usage. `schema` goes up only when a
+field is removed or changes meaning.
 
 ### When a combination does not build
 
