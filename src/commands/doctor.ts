@@ -46,32 +46,36 @@ export async function checkPreconditions(options: {
   onStep(`Snapshotting working tree`);
   const snapshot = await snapshotWorkingTree(repo, "whodunit: working tree snapshot");
 
-  onStep(`Testing baseline (${baselineRef} ${baselineCommit.slice(0, 7)})`);
-  const baselineSandbox = await createSandbox(repo, baselineCommit, { link });
   let baseline: TestResult;
-  try {
-    baseline = await runTest(testCommand, {
-      cwd: baselineSandbox.path,
-      timeoutMs,
-      skipExitCodes,
-    });
-  } finally {
-    await baselineSandbox.dispose();
-  }
-
-  onStep(`Testing current tree (${snapshot.commit.slice(0, 7)})`);
-  const currentSandbox = await createSandbox(repo, snapshot.commit, { link });
   let current: TestResult;
   let linked: string[];
   try {
-    linked = currentSandbox.linked;
-    current = await runTest(testCommand, {
-      cwd: currentSandbox.path,
-      timeoutMs,
-      skipExitCodes,
-    });
+    onStep(`Testing baseline (${baselineRef} ${baselineCommit.slice(0, 7)})`);
+    const baselineSandbox = await createSandbox(repo, baselineCommit, { link });
+    try {
+      baseline = await runTest(testCommand, {
+        cwd: baselineSandbox.path,
+        timeoutMs,
+        skipExitCodes,
+      });
+    } finally {
+      await baselineSandbox.dispose();
+    }
+
+    onStep(`Testing current tree (${snapshot.commit.slice(0, 7)})`);
+    const currentSandbox = await createSandbox(repo, snapshot.commit, { link });
+    try {
+      linked = currentSandbox.linked;
+      current = await runTest(testCommand, {
+        cwd: currentSandbox.path,
+        timeoutMs,
+        skipExitCodes,
+      });
+    } finally {
+      await currentSandbox.dispose();
+    }
   } finally {
-    await currentSandbox.dispose();
+    await snapshot.release();
   }
 
   let reason: string;

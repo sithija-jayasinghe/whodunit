@@ -22,9 +22,16 @@ export async function listHunks(options: {
 }): Promise<HunkListing> {
   const baselineCommit = await resolveRef(options.repo, options.baselineRef);
   const snapshot = await snapshotWorkingTree(options.repo, "whodunit: working tree snapshot");
-  const diff = await diffCommits(options.repo, baselineCommit, snapshot.commit, {
-    contextLines: options.contextLines ?? DEFAULT_CONTEXT_LINES,
-  });
+  let diff: string;
+  try {
+    diff = await diffCommits(options.repo, baselineCommit, snapshot.commit, {
+      contextLines: options.contextLines ?? DEFAULT_CONTEXT_LINES,
+    });
+  } finally {
+    // The search works from the diff text and the baseline alone, so the
+    // snapshot commit is not needed past this point.
+    await snapshot.release();
+  }
   const patches = parseDiff(diff);
   return {
     baselineCommit,

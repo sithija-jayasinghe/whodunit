@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 import { execOrThrow } from "../src/util/exec.js";
 import { search } from "../src/commands/search.js";
+import { listHunks } from "../src/commands/hunks.js";
+import { checkPreconditions } from "../src/commands/doctor.js";
 
 const TEST_COMMAND = ["node", "test.js"];
 
@@ -207,4 +209,25 @@ test("a hunk that only breaks the build is skipped, not blamed", async () => {
   await rm(join(repo, "run.js"));
   await execOrThrow("git", ["add", "-A"], { cwd: repo });
   await execOrThrow("git", ["commit", "-qm", "drop build wrapper"], { cwd: repo });
+});
+
+test("no snapshot refs are left behind by any command", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+  const snapshotRefs = async () =>
+    (
+      await execOrThrow("git", ["for-each-ref", "--format=%(refname)", "refs/whodunit"], {
+        cwd: repo,
+      })
+    ).stdout.trim();
+
+  await listHunks({ repo, baselineRef: "HEAD" });
+  assert.equal(await snapshotRefs(), "", "hunks left a ref");
+
+  await checkPreconditions({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
+  assert.equal(await snapshotRefs(), "", "doctor left a ref");
+
+  const report = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
+  assert.equal(report.result?.culprits[0]?.file, "src/mod6.js");
+  assert.equal(await snapshotRefs(), "", "search left a ref");
 });

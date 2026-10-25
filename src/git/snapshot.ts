@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { execOrThrow } from "../util/exec.js";
+import { exec, execOrThrow } from "../util/exec.js";
 import { onInterrupt } from "../util/interrupt.js";
 import { hasCommits } from "./repo.js";
 
@@ -13,6 +13,11 @@ export interface Snapshot {
   commit: string;
   /** Ref the commit is parked under so Git will not garbage-collect it. */
   ref: string;
+  /**
+   * Delete the ref once the commit is no longer needed. Safe to call more than
+   * once. Without this every run would leave a ref in the user's repo.
+   */
+  release(): Promise<void>;
 }
 
 /**
@@ -54,7 +59,16 @@ export async function snapshotWorkingTree(repo: string, message: string): Promis
     const ref = `${SNAPSHOT_REF_PREFIX}/${Date.now()}-${commit.slice(0, 7)}`;
     await execOrThrow("git", ["update-ref", ref, commit], { cwd: repo });
 
-    return { commit, ref };
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      offRef();
+      await exec("git", ["update-ref", "-d", ref], { cwd: repo });
+    };
+    const offRef = onInterrupt(release);
+
+    return { commit, ref, release };
   } finally {
     offInterrupt();
     await removeScratch();

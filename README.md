@@ -102,7 +102,7 @@ whodunit [options] -- <test command>
 COMMANDS
   doctor    Check that the baseline passes and the current tree fails.
   hunks     List the individual changes the search would bisect.
-  prune     Delete every snapshot ref whodunit created in this repo.
+  prune     Delete snapshot refs left by a crashed or force-killed run.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD

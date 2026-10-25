@@ -27,7 +27,8 @@ COMMANDS
   doctor    Check that the baseline passes and the current tree fails,
             without searching. Use this first.
   hunks     List the individual changes the search would bisect.
-  prune     Delete every snapshot ref whodunit has created in this repo.
+  prune     Delete snapshot refs left behind by a run that crashed or
+            was force-killed. Normal runs clean up after themselves.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
