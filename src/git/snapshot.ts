@@ -8,6 +8,20 @@ import { hasCommits } from "./repo.js";
 
 const SNAPSHOT_REF_PREFIX = "refs/whodunit/snapshots";
 
+/**
+ * Who the snapshot commit is by. `git commit-tree` refuses to run without an
+ * identity, and a fresh CI runner or container usually has none and cannot
+ * guess one from its hostname. The commit is internal and never shown, so a
+ * fixed identity is fine, and passing it through the environment leaves the
+ * user's git config alone.
+ */
+const SNAPSHOT_IDENTITY = {
+  GIT_AUTHOR_NAME: "whodunit",
+  GIT_AUTHOR_EMAIL: "whodunit@localhost",
+  GIT_COMMITTER_NAME: "whodunit",
+  GIT_COMMITTER_EMAIL: "whodunit@localhost",
+};
+
 export interface Snapshot {
   /** Commit sha holding the captured tree. */
   commit: string;
@@ -54,7 +68,9 @@ export async function snapshotWorkingTree(repo: string, message: string): Promis
       const head = (await execOrThrow("git", ["rev-parse", "HEAD"], { cwd: repo })).stdout.trim();
       commitArgs.push("-p", head);
     }
-    const commit = (await execOrThrow("git", commitArgs, { cwd: repo, env })).stdout.trim();
+    const commit = (
+      await execOrThrow("git", commitArgs, { cwd: repo, env: { ...env, ...SNAPSHOT_IDENTITY } })
+    ).stdout.trim();
 
     const ref = `${SNAPSHOT_REF_PREFIX}/${Date.now()}-${commit.slice(0, 7)}`;
     await execOrThrow("git", ["update-ref", ref, commit], { cwd: repo });
