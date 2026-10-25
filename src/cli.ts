@@ -33,7 +33,7 @@ COMMANDS
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
-  --timeout <ms>    Kill a test run after this long. Default: ${DEFAULT_TEST_TIMEOUT_MS}
+  --timeout <ms>    Kill a test run after this long. Default: ${DEFAULT_TEST_TIMEOUT_MS} (10 min)
   --context <n>     Diff context lines. Higher values make Git merge
                     nearby changes into one hunk. Default: 1
   --max-probes <n>  Give up after this many search runs, not counting the
@@ -43,7 +43,8 @@ OPTIONS
                     when the build fails. Repeatable. ${SKIP_EXIT_CODE} always counts,
                     as in git bisect run.
   --link <path>     Extra gitignored path to link into the sandbox.
-                    Repeatable. node_modules and .venv are linked already.
+                    Repeatable. node_modules, .venv, venv and vendor/bundle
+                    are linked already.
   --verbose         Print the output of every test run.
   --json            Print one JSON object instead of text, for scripts and
                     agents. With --verbose it includes test output.
@@ -51,10 +52,12 @@ OPTIONS
   -v, --version     Show version
 
 EXAMPLES
-  whodunit hunks
-  whodunit doctor -- npm test
-  whodunit doctor --since HEAD~1 -- npx vitest run auth.test.ts
+  whodunit doctor -- npm test auth.test.ts
+  whodunit -- npm test auth.test.ts
+  whodunit --since HEAD~1 -- npx vitest run auth.test.ts
+  whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
   whodunit --json -- npm test auth.test.ts
+  whodunit hunks
 `;
 
 /** Split argv at the first bare "--" so the test command stays intact. */

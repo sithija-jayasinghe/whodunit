@@ -2,41 +2,52 @@
 
 **Find which single change broke your test.**
 
-An AI agent just changed 14 files. Your test is red. Instead of reading a diff
+An AI agent just changed 12 files. Your test is red. Instead of reading a diff
 you did not write, run:
 
 ```bash
-whodunit -- npm test auth.test.ts
+whodunit -- node test.js
 ```
 
-whodunit splits the change into individual hunks and binary-searches them against
+whodunit splits the change into individual hunks and searches them against
 your failing test until it finds the smallest set that still reproduces the
 failure. It does not guess — it proves the answer by running your test.
 
 ```
-Found 31 changes across 14 files
-Confirming test fails... yes
+  Snapshotting working tree...
+  Testing baseline (37 changes to search)...
+  Confirming the current tree fails...
+  Searching...
+    [ 1]   19 of 37   PASS
+    [ 2]   18 of 37   FAIL
+    [ 3]    9 of 18   PASS
+    [ 4]    9 of 18   FAIL
+    [ 5]    5 of 9    FAIL
+    [ 6]    3 of 5    FAIL
+    [ 7]    2 of 3    FAIL
+    [ 8]    1 of 2    PASS
+    [ 9]    1 of 2    FAIL
 
-Searching:
-  [1/5]  16 changes  ->  FAIL
-  [2/5]   8 changes  ->  FAIL
-  [3/5]   4 changes  ->  PASS
-  [4/5]   2 changes  ->  FAIL
-  [5/5]   1 change   ->  FAIL
+  Found it. 1 change out of 37:
 
-Found it. 1 change out of 31:
+  src/mod7.js, line 7
 
-  src/auth/token.ts, line 42
+    -  return input * 72 + 2;
+    +  // normalized in refactor pass
+    +  const scaled = input * 72;
+    +  return scaled;
 
-  -  const expiry = Date.now() + ttl * 1000
-  +  const expiry = Date.now() + ttl
+  Proven: the test passes without this change and fails with it.
+  11 test runs in 1.1s.
 ```
+
+That is real output, from the fixture `test/make-fixture.sh` builds.
 
 ## Why not just use rewind?
 
-Claude Code and Cursor can undo a whole change. That throws away the thirteen
-good files to remove the one bad line, and it never tells you what was wrong.
-whodunit keeps the good and isolates the bad.
+Claude Code and Cursor can undo a whole change. That throws away the good files
+to remove the one bad line, and it never tells you what was wrong. whodunit
+keeps the good and isolates the bad.
 
 An AI can also *read* the diff and guess the cause. Sometimes it is right.
 whodunit runs the test, so when it names a change it has watched the test pass
@@ -48,104 +59,87 @@ It is [delta debugging](https://en.wikipedia.org/wiki/Delta_debugging)
 (Zeller's ddmin) applied to diff hunks rather than to program input.
 
 A plain binary search is not enough, because hunks are not independent —
-applying half a change often will not compile. ddmin handles that with a third
-outcome, `unresolved`, and widens granularity instead of giving up.
+applying half a change often will not compile, and a failure can need two
+changes together. ddmin handles that with a third outcome, `unresolved`, and
+widens granularity instead of giving up.
 
 Everything happens in a throwaway `git worktree` under your temp directory.
-**Your real working tree is never modified.**
-
-## Status
-
-Early. Built in phases:
-
-| Phase | What | Status |
-|---|---|---|
-| 1 | Snapshot, sandbox, test runner, `doctor` | done |
-| 2 | Diff splitter, subset apply | done |
-| 3 | ddmin search | done |
-| 4 | Report and CLI polish | mostly |
-| 5 | MCP server, so agents can call it | |
-
-The search works today:
-
-```bash
-whodunit -- node test.js
-```
-
-`whodunit hunks` lists the changes it would bisect, and
-`whodunit doctor -- <test command>` checks the preconditions without searching.
+**Your real working tree is never modified**, and the sandbox is removed when
+the run ends — including when you press Ctrl+C.
 
 ## Install
+
+whodunit is not on npm yet. From a clone:
 
 ```bash
 npm install
 npm run build
+npm link
 ```
 
-Then run it locally:
-
-```bash
-node dist/cli.js doctor -- npm test
-```
-
-Or during development, without building:
-
-```bash
-npx tsx src/cli.ts doctor -- npm test
-```
+`npm link` puts `whodunit` on your PATH. To run it without linking, use
+`node dist/cli.js` in its place, or `npx tsx src/cli.ts` to skip the build.
 
 ## Usage
+
+Start with `doctor`. It runs your test twice, once at the baseline and once on
+your current tree, and tells you whether there is anything to search:
+
+```bash
+whodunit doctor -- npm test auth.test.ts
+```
+
+Then search:
+
+```bash
+whodunit -- npm test auth.test.ts
+```
+
+Point it at the one failing test, not the whole suite. The search runs it many
+times.
 
 ```
 whodunit [options] -- <test command>
 
 COMMANDS
-  doctor    Check that the baseline passes and the current tree fails.
+  doctor    Check that the baseline passes and the current tree fails,
+            without searching. Use this first.
   hunks     List the individual changes the search would bisect.
-  prune     Delete snapshot refs left by a crashed or force-killed run.
+  prune     Delete snapshot refs left behind by a run that crashed or
+            was force-killed. Normal runs clean up after themselves.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
-  --timeout <ms>    Kill a test run after this long.
-  --context <n>     Diff context lines. Default: 3
-  --link <path>     Extra gitignored path to link into the sandbox. Repeatable.
+  --timeout <ms>    Kill a test run after this long. Default: 600000 (10 min)
+  --context <n>     Diff context lines. Higher values make Git merge
+                    nearby changes into one hunk. Default: 1
+  --max-probes <n>  Give up after this many search runs, not counting the
+                    two initial checks. Default: 60
   --skip-exit-code <n>
-                    Exit code meaning "cannot test this state". Repeatable.
-                    125 always counts.
+                    Treat this exit code as "cannot test this state", e.g.
+                    when the build fails. Repeatable. 125 always counts,
+                    as in git bisect run.
+  --link <path>     Extra gitignored path to link into the sandbox.
+                    Repeatable. node_modules, .venv, venv and vendor/bundle
+                    are linked already.
   --verbose         Print the output of every test run.
-  --json            Print one JSON object instead of text.
+  --json            Print one JSON object instead of text, for scripts and
+                    agents. With --verbose it includes test output.
+  -h, --help        Show this help
+  -v, --version     Show version
 ```
 
-### JSON output
+The baseline is `HEAD` by default, so whodunit searches your uncommitted
+changes. To search the last commit as well, use `--since HEAD~1`.
 
-`--json` works with the search, `doctor` and `hunks`. stdout is then exactly one
-JSON document, so a script or an agent can parse it without scraping text:
+### Exit codes
 
-```bash
-whodunit --json -- npm test auth.test.ts
-```
-
-```json
-{
-  "schema": 1,
-  "command": "run",
-  "searchable": true,
-  "reason": "Search completed.",
-  "totalChanges": 31,
-  "culprits": [
-    { "file": "src/auth/token.ts", "line": 42, "added": 1, "removed": 1,
-      "patch": "@@ -41,3 +41,3 @@ ..." }
-  ],
-  "minimal": true,
-  "testRuns": 7
-}
-```
-
-Abridged: the full object also has the commits, timings and each hunk's id.
-Add `--verbose` to include the stdout and stderr of the baseline and current
-runs. Errors are JSON too (`{ "schema": 1, "error": "..." }`). Exit codes do not
-change: 0 found, 1 nothing to search, 2 bad usage. `schema` goes up only when a
-field is removed or changes meaning.
+| Code | Meaning |
+|---|---|
+| 0 | Found the culprit (or `doctor`: ready to search) |
+| 1 | Nothing to search: the baseline already fails, the current tree passes, or a run could not be judged |
+| 2 | Bad usage: an unknown option or an invalid value |
+| 130 / 143 | Interrupted by Ctrl+C / SIGTERM, after cleaning up |
 
 ### When a combination does not build
 
@@ -161,7 +155,49 @@ whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
 ```
 
 If your tool already uses a different exit code for build errors, pass it with
-`--skip-exit-code`. A timeout also counts as "cannot judge".
+`--skip-exit-code`. A timeout also counts as "cannot judge", and the timeout
+kills everything the test started, not just the top process.
+
+### Seeing what the test printed
+
+`--verbose` prints each run's output under the line that started it:
+
+```
+    [ 2]    1 of 3    FAIL
+           | FAIL sum: got -1, expected 5
+```
+
+### JSON output
+
+`--json` works with the search, `doctor`, `hunks` and `prune`. stdout is then
+exactly one JSON document, so a script or an agent can parse it without
+scraping text:
+
+```bash
+whodunit --json -- npm test auth.test.ts
+```
+
+```json
+{
+  "schema": 1,
+  "command": "run",
+  "searchable": true,
+  "reason": "Search completed.",
+  "totalChanges": 37,
+  "culprits": [
+    { "file": "src/mod7.js", "line": 7, "added": 3, "removed": 1,
+      "patch": "@@ -5,3 +7,5 @@ ..." }
+  ],
+  "minimal": true,
+  "testRuns": 11
+}
+```
+
+Abridged: the full object also has the commits, timings and each hunk's id.
+Add `--verbose` to include the stdout and stderr of the baseline and current
+runs. Errors are JSON too (`{ "schema": 1, "error": "..." }`), and the exit
+codes are the same as without `--json`. `schema` goes up only when a field is
+removed or changes meaning.
 
 ### The sandbox and your dependencies
 
@@ -182,26 +218,35 @@ no line survives. This is fundamental, not a setting.
 **Binary files and mode changes cannot be split.** Included or excluded whole.
 
 **It needs a fast, deterministic test.** The search runs your test command
-several times. Point it at the single failing test, not the whole suite.
+many times. Point it at the single failing test, not the whole suite.
 
 **A flaky test produces a confident wrong answer.** whodunit trusts the exit
 code. If your test fails intermittently, the result is meaningless.
 
+**Windows is untested.** whodunit is developed on macOS, and the sandbox
+relies on symlinks, which Windows restricts by default.
+
 ## How many test runs it takes
 
-One culprit is cheap. Several that only fail together are not — ddmin is
-quadratic in the worst case, which is why there is a probe budget.
+One culprit is cheap: the count grows with the logarithm of the number of
+changes. Two that only fail together are not — ddmin is quadratic in the worst
+case, which is why there is a budget.
 
-| Changes | Culprits | Test runs |
+| Changes | 1 culprit | 2 that only fail together |
 |---|---|---|
-| 37 | 1 | 9 |
-| 50 | 1 | 7 |
-| 100 | 1 | 11 |
-| 30 | 2, interacting | 32 |
-| 100 | 2, interacting | 46 |
+| 10 | 7 (at most 8) | 18 (at most 28) |
+| 30 | 9 (at most 11) | 32 (at most 37) |
+| 100 | 12 (at most 15) | 45 (at most 54) |
+| 300 | 14 (at most 18) | 55 (at most 67) |
 
-When the budget runs out you still get a real failing set, reported as
-"narrowed to" rather than "found it", because it was not proven minimal.
+Typical (median) test runs, including the two initial checks, with the worst
+case seen in brackets. Measured by running the search against simulated tests,
+across every culprit position and 300 random pairs.
+
+The default `--max-probes 60` covers all of these except the worst pairs among
+hundreds of changes. When the budget runs out you still get a real failing
+set, reported as "narrowed to" rather than "found it", because it was not
+proven minimal.
 
 ## A note on context lines
 
@@ -222,10 +267,20 @@ Zero is the floor: it splits no more finely than 1, and `git apply` rejects
 zero-context patches unless given `--unidiff-zero`, which disables the
 placement check that stops a hunk landing in the wrong place.
 
+## Status
+
+| Phase | What | Status |
+|---|---|---|
+| 1 | Snapshot, sandbox, test runner, `doctor` | done |
+| 2 | Diff splitter, subset apply | done |
+| 3 | ddmin search | done |
+| 4 | Report and CLI: `--verbose`, `--json`, skip codes, clean interrupts | done |
+| 5 | MCP server, so agents can call it | next |
+
 ## Requirements
 
 - Node 20+
-- Git 2.5+ (for `git worktree`)
+- Git 2.17+ (for `git worktree remove`)
 - A test command that exits 0 when things are fine
 
 No runtime dependencies.
