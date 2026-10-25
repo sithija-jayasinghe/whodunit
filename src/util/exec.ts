@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 export interface ExecOptions {
   cwd?: string;
@@ -27,10 +27,19 @@ export function exec(
   options: ExecOptions = {},
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
+    // With a timeout, lead a new process group so the timeout can kill
+    // everything the command started and not just the command. See killTree.
+    const detached = options.timeoutMs !== undefined && process.platform !== "win32";
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env ? { ...process.env, ...options.env } : process.env,
+      detached,
     });
+    if (detached) {
+      forwardInterrupts();
+      grouped.add(child);
+      child.on("exit", () => grouped.delete(child));
+    }
 
     let stdout = "";
     let stderr = "";
@@ -41,7 +50,11 @@ export function exec(
         ? undefined
         : setTimeout(() => {
             timedOut = true;
-            child.kill("SIGKILL");
+            killTree(child);
+            // Anything that escaped the group could still hold our pipes open
+            // and keep "close" from firing. We have given up on its output.
+            child.stdout.destroy();
+            child.stderr.destroy();
           }, options.timeoutMs);
 
     child.stdout.setEncoding("utf8");
@@ -67,6 +80,55 @@ export function exec(
       child.stdin.end(options.input);
     }
   });
+}
+
+/** Children running in a process group of their own. */
+const grouped = new Set<ChildProcess>();
+let forwarding = false;
+
+/**
+ * Pass Ctrl+C and SIGTERM on to every grouped child.
+ *
+ * The terminal only signals its foreground process group. A child that leads
+ * its own group never hears Ctrl+C, so without this it would keep running
+ * after whodunit exits. Once the children are dead the signal is re-raised, so
+ * the default exit still happens unless someone else is listening for it.
+ */
+function forwardInterrupts(): void {
+  if (forwarding) return;
+  forwarding = true;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const onSignal = () => {
+      for (const child of grouped) killTree(child);
+      if (process.listenerCount(signal) === 1) {
+        process.removeListener(signal, onSignal);
+        process.kill(process.pid, signal);
+      }
+    };
+    process.on(signal, onSignal);
+  }
+}
+
+/**
+ * Kill `child` and every process it started.
+ *
+ * Test commands are rarely one process: `npm test` runs a shell, which runs
+ * node, which may run workers. Killing only the top one leaves the rest running
+ * and still holding stdout, so a timeout would wait out the full test anyway.
+ * On POSIX the child leads its own process group, and a negative pid signals
+ * the whole group. Windows has no groups, so taskkill walks the tree instead.
+ */
+function killTree(child: ChildProcess): void {
+  if (child.pid === undefined) return;
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(-child.pid, "SIGKILL");
+    }
+  } catch {
+    // The group is already gone.
+  }
 }
 
 export class CommandError extends Error {
