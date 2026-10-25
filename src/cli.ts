@@ -9,6 +9,8 @@ import { formatCulprit, formatRunOutput } from "./report/format.js";
 import { hunksToJson, JSON_SCHEMA_VERSION, preconditionsToJson, searchToJson } from "./report/json.js";
 import { pruneSnapshots } from "./git/snapshot.js";
 import { repoRoot } from "./git/repo.js";
+import { serveMcp } from "./mcp/server.js";
+import { shutdown } from "./util/interrupt.js";
 import { DEFAULT_TEST_TIMEOUT_MS, SKIP_EXIT_CODE } from "./runner/test.js";
 import type { TestResult } from "./types.js";
 
@@ -30,6 +32,8 @@ COMMANDS
   hunks     List the individual changes the search would bisect.
   prune     Delete snapshot refs left behind by a run that crashed or
             was force-killed. Normal runs clean up after themselves.
+  mcp       Run as an MCP server on stdio, so an agent can call the
+            search, doctor and hunks as tools.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
@@ -123,6 +127,16 @@ async function main(argv: string[], json: boolean): Promise<number> {
   }
 
   const command = positionals[0] ?? "run";
+
+  // Before repoRoot: the server is started by an agent, often outside any
+  // repository, and each tool call names its own.
+  if (command === "mcp") {
+    await serveMcp({ input: process.stdin, output: process.stdout, version: VERSION });
+    // The client closed the connection. Stop any search still running and
+    // remove its sandbox rather than leaving it behind.
+    return shutdown(0);
+  }
+
   const repo = await repoRoot(process.cwd());
 
   if (command === "prune") {

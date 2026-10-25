@@ -109,6 +109,8 @@ COMMANDS
   hunks     List the individual changes the search would bisect.
   prune     Delete snapshot refs left behind by a run that crashed or
             was force-killed. Normal runs clean up after themselves.
+  mcp       Run as an MCP server on stdio, so an agent can call the
+            search, doctor and hunks as tools.
 
 OPTIONS
   --since <ref>     Baseline to compare against. Default: HEAD
@@ -201,6 +203,38 @@ runs. Errors are JSON too (`{ "schema": 1, "error": "..." }`), and the exit
 codes are the same as without `--json`. `schema` goes up only when a field is
 removed or changes meaning.
 
+### As an MCP server, for agents
+
+`whodunit mcp` serves the search over the
+[Model Context Protocol](https://modelcontextprotocol.io), so a coding agent
+can find the change that broke a test on its own, right after making it.
+
+With Claude Code, after `npm link`:
+
+```bash
+claude mcp add whodunit -- whodunit mcp
+```
+
+Any other MCP client takes the same command: `whodunit mcp`, over stdio.
+
+It exposes three tools:
+
+| Tool | Does |
+|---|---|
+| `whodunit_search` | The search. Returns the same object as `--json`. |
+| `whodunit_doctor` | The two precondition runs, without searching. |
+| `whodunit_hunks` | Lists the changes. Runs no tests. |
+
+Each takes `cwd`, the repository to work in, and the search and doctor take
+`command` as an argument list such as `["npm", "test", "auth.test.ts"]`. It is
+not run through a shell; use `["sh", "-c", "..."]` when you need one. The other
+options match the CLI flags.
+
+Searches report progress as they go. If the client closes the connection, any
+search still running is stopped and its sandbox removed. The server speaks both
+the current protocol (`2026-07-28`) and the earlier `initialize`-based versions
+back to `2024-11-05`, and has no dependencies beyond Node.
+
 ### The sandbox and your dependencies
 
 A fresh worktree has no `node_modules`, so a test command would fail for the
@@ -277,7 +311,7 @@ placement check that stops a hunk landing in the wrong place.
 | 2 | Diff splitter, subset apply | done |
 | 3 | ddmin search | done |
 | 4 | Report and CLI: `--verbose`, `--json`, skip codes, clean interrupts | done |
-| 5 | MCP server, so agents can call it | next |
+| 5 | MCP server, so agents can call it | done |
 
 ## Requirements
 

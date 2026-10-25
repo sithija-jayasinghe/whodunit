@@ -37,9 +37,17 @@ async function handle(signal: Signal): Promise<void> {
   const code = 128 + SIGNALS[signal];
   // A second Ctrl+C while cleaning up means "stop now", as it does elsewhere.
   if (interrupted) process.exit(code);
-  interrupted = true;
   process.stderr.write("\nwhodunit: interrupted, cleaning up...\n");
+  await shutdown(code);
+}
 
+/**
+ * Run every registered cleanup, then exit with `code`. For a planned exit
+ * while work is still running, such as an MCP client closing the connection
+ * in the middle of a search.
+ */
+export async function shutdown(code: number): Promise<never> {
+  interrupted = true;
   // Newest first: a test process is registered after the sandbox it runs in,
   // so it is killed before the sandbox is removed from under it.
   for (const cleanup of cleanups.splice(0).reverse()) {
