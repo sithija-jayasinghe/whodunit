@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
 import { checkPreconditions } from "./commands/doctor.js";
@@ -10,7 +11,11 @@ import { repoRoot } from "./git/repo.js";
 import { DEFAULT_TEST_TIMEOUT_MS } from "./runner/test.js";
 import type { TestResult } from "./types.js";
 
-const VERSION = "0.0.1";
+// package.json sits one level above both src/cli.ts and dist/cli.js, and npm
+// always ships it, so this one path works in development and when installed.
+const VERSION: string = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 
 const HELP = `whodunit ${VERSION}
 Find which single change broke your test.
