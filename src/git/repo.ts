@@ -6,11 +6,6 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
   return result.stdout.trim();
 }
 
-/** Run a git command, returning the raw result without throwing. */
-export async function gitRaw(cwd: string, ...args: string[]) {
-  return exec("git", args, { cwd });
-}
-
 /** Absolute path to the root of the repo containing `cwd`. */
 export async function repoRoot(cwd: string): Promise<string> {
   const result = await exec("git", ["rev-parse", "--show-toplevel"], { cwd });

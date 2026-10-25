@@ -52,11 +52,3 @@ export async function applySubset(
   const result = await applyPatch(sandboxPath, patch);
   return { applied: result.ok, stderr: result.stderr };
 }
-
-/** Reset the sandbox back to the baseline tree between attempts. */
-export async function resetSandbox(
-  sandboxPath: string,
-  preserve: readonly string[] = [],
-): Promise<void> {
-  await resetWorktree(sandboxPath, preserve);
-}

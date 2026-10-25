@@ -8,7 +8,7 @@ export { checkPreconditions } from "./commands/doctor.js";
 export { listHunks, formatHunkListing } from "./commands/hunks.js";
 export type { HunkListing } from "./commands/hunks.js";
 export { parseDiff, collectHunks } from "./diff/parse.js";
-export { buildPatch, applySubset, resetSandbox } from "./diff/apply.js";
+export { buildPatch, applySubset } from "./diff/apply.js";
 export { diffCommits, applyPatch, resetWorktree, DEFAULT_CONTEXT_LINES } from "./git/diff.js";
 export type { PreconditionReport } from "./commands/doctor.js";
 export { search, DEFAULT_MAX_PROBES } from "./commands/search.js";

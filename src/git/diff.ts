@@ -72,16 +72,6 @@ export async function applyPatch(cwd: string, patch: string): Promise<ApplyResul
   return { ok: result.exitCode === 0, stderr: result.stderr };
 }
 
-/** Check whether a patch would apply, without touching the working tree. */
-export async function patchApplies(cwd: string, patch: string): Promise<boolean> {
-  if (patch.trim() === "") return true;
-  const result = await exec("git", ["apply", "--check", "--whitespace=nowarn", "-"], {
-    cwd,
-    input: patch,
-  });
-  return result.exitCode === 0;
-}
-
 /**
  * Return the working tree at `cwd` to its checked-out commit.
  *
