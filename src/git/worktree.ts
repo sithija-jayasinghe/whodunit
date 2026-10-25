@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { execOrThrow, exec } from "../util/exec.js";
+import { onInterrupt } from "../util/interrupt.js";
 
 /**
  * Directories that live inside a project but are deliberately gitignored, so a
@@ -54,9 +55,29 @@ export async function createSandbox(
   // `git worktree add` insists on creating the leaf directory itself.
   const path = join(parent, "work");
 
-  await execOrThrow("git", ["worktree", "add", "--detach", "--quiet", path, commit], {
-    cwd: repo,
-  });
+  let disposed = false;
+  const dispose = async () => {
+    if (disposed) return;
+    disposed = true;
+    offInterrupt();
+    // Best effort: tell Git first so its administrative files stay clean,
+    // then make sure the directory is actually gone.
+    await exec("git", ["worktree", "remove", "--force", path], { cwd: repo });
+    await rm(parent, { recursive: true, force: true });
+    await exec("git", ["worktree", "prune"], { cwd: repo });
+  };
+  // Registered before the worktree exists, so even a Ctrl+C during the
+  // checkout leaves nothing behind.
+  const offInterrupt = onInterrupt(dispose);
+
+  try {
+    await execOrThrow("git", ["worktree", "add", "--detach", "--quiet", path, commit], {
+      cwd: repo,
+    });
+  } catch (error) {
+    await dispose();
+    throw error;
+  }
 
   const wanted = options.replaceDefaults
     ? [...(options.link ?? [])]
@@ -75,18 +96,5 @@ export async function createSandbox(
     }
   }
 
-  let disposed = false;
-  return {
-    path,
-    linked,
-    async dispose() {
-      if (disposed) return;
-      disposed = true;
-      // Best effort: tell Git first so its administrative files stay clean,
-      // then make sure the directory is actually gone.
-      await exec("git", ["worktree", "remove", "--force", path], { cwd: repo });
-      await rm(parent, { recursive: true, force: true });
-      await exec("git", ["worktree", "prune"], { cwd: repo });
-    },
-  };
+  return { path, linked, dispose };
 }

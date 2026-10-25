@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { onInterrupt } from "./interrupt.js";
+
 export interface ExecOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -35,10 +37,21 @@ export function exec(
       env: options.env ? { ...process.env, ...options.env } : process.env,
       detached,
     });
+    let interrupted = false;
     if (detached) {
-      forwardInterrupts();
-      grouped.add(child);
-      child.on("exit", () => grouped.delete(child));
+      // The terminal only signals its foreground process group, so a child
+      // leading its own group never hears Ctrl+C. Pass it on, and wait for the
+      // child to die so nothing is still running when the sandbox goes.
+      const off = onInterrupt(
+        () =>
+          new Promise<void>((done) => {
+            if (child.exitCode !== null || child.signalCode !== null) return done();
+            interrupted = true;
+            child.once("exit", () => done());
+            killTree(child);
+          }),
+      );
+      child.once("exit", off);
     }
 
     let stdout = "";
@@ -73,6 +86,10 @@ export function exec(
 
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      // Killed because whodunit is exiting. Its exit code says nothing about
+      // the test, so never report it: the caller would take it as a failure
+      // and carry on while the cleanup runs.
+      if (interrupted) return;
       resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
     });
 
@@ -80,33 +97,6 @@ export function exec(
       child.stdin.end(options.input);
     }
   });
-}
-
-/** Children running in a process group of their own. */
-const grouped = new Set<ChildProcess>();
-let forwarding = false;
-
-/**
- * Pass Ctrl+C and SIGTERM on to every grouped child.
- *
- * The terminal only signals its foreground process group. A child that leads
- * its own group never hears Ctrl+C, so without this it would keep running
- * after whodunit exits. Once the children are dead the signal is re-raised, so
- * the default exit still happens unless someone else is listening for it.
- */
-function forwardInterrupts(): void {
-  if (forwarding) return;
-  forwarding = true;
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    const onSignal = () => {
-      for (const child of grouped) killTree(child);
-      if (process.listenerCount(signal) === 1) {
-        process.removeListener(signal, onSignal);
-        process.kill(process.pid, signal);
-      }
-    };
-    process.on(signal, onSignal);
-  }
 }
 
 /**

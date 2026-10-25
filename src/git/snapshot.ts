@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { execOrThrow } from "../util/exec.js";
+import { onInterrupt } from "../util/interrupt.js";
 import { hasCommits } from "./repo.js";
 
 const SNAPSHOT_REF_PREFIX = "refs/whodunit/snapshots";
@@ -24,6 +25,8 @@ export interface Snapshot {
  */
 export async function snapshotWorkingTree(repo: string, message: string): Promise<Snapshot> {
   const scratch = await mkdtemp(join(tmpdir(), "whodunit-index-"));
+  const removeScratch = () => rm(scratch, { recursive: true, force: true });
+  const offInterrupt = onInterrupt(removeScratch);
   const indexFile = join(scratch, "index");
   const env = { GIT_INDEX_FILE: indexFile };
 
@@ -53,7 +56,8 @@ export async function snapshotWorkingTree(repo: string, message: string): Promis
 
     return { commit, ref };
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    offInterrupt();
+    await removeScratch();
   }
 }
 
