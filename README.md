@@ -1,5 +1,7 @@
 # whodunit
 
+[![CI](https://github.com/sithija-jayasinghe/whodunit/actions/workflows/ci.yml/badge.svg)](https://github.com/sithija-jayasinghe/whodunit/actions/workflows/ci.yml)
+
 **Find which single change broke your test.**
 
 An AI agent just changed 12 files. Your test is red. Instead of reading a diff
