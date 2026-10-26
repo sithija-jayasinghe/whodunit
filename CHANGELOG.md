@@ -5,6 +5,24 @@ All notable changes to whodunit are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Until 1.0, a minor version may
 change behavior.
 
+## [Unreleased]
+
+### Changed
+
+- A failing run now counts as the failure being hunted only if it prints the
+  same failure as the current tree. whodunit fingerprints the original failure
+  from the lines it printed that the passing baseline did not, ignoring
+  numbers, stack frames and runtime boilerplate, and skips runs that broke some
+  other way. Before, any non-zero exit counted, so a hunk that only made the
+  code crash, such as half of a renamed import, could be reported as a proven
+  culprit. Found by testing whodunit on changes that only fail together.
+
+### Added
+
+- `--any-failure` (`anyFailure` on the MCP search tool) restores the old
+  behavior of counting every non-zero exit.
+- `--json` reports the fingerprint as `signature`.
+
 ## [0.2.0] - 2026-10-26
 
 Makes answers trustworthy on real, messy test suites.
@@ -60,6 +78,7 @@ The first release. Tagged in git, not published to npm (see 0.1.1).
   and remove the sandbox before exiting.
 - No runtime dependencies.
 
+[Unreleased]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sithija-jayasinghe/whodunit/releases/tag/v0.1.0

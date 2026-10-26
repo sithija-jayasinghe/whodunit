@@ -130,20 +130,30 @@ once: the running test is killed and its sandbox removed.
 Three things can send a naive search the wrong way. whodunit has an answer to
 each.
 
-**A combination does not build.** Leave out the change that defines a function
-and keep the one that calls it, and the build fails. That looks like a test
-failure. Exit **125** to say "can't judge this", as with `git bisect run`:
+**A combination breaks in some other way.** Keep the change that uses a
+function but leave out the one that defines it, and the code crashes. That
+exits non-zero just like the real failure, and a search that trusts exit codes
+blames whichever change caused the crash.
+
+whodunit fingerprints the original failure instead: the lines the failing run
+printed that the passing version did not, ignoring numbers, stack frames and
+other boilerplate. A run only counts as broken if it prints that same failure,
+and anything else is skipped as "can't tell":
+
+```
+  Matching failures to "FAIL office order total: expected $70.36, got $65.45"...
+```
+
+This is what lets it find changes that only break together. In
+[a practice repo](test/make-playground-pair.sh) where two edits are each
+harmless alone, trusting exit codes blamed a single import line. With the
+fingerprint, whodunit names both edits and proves they only fail together.
+
+To pin the failure yourself, pass `--match "expected 5"`. For a build step,
+exit **125** to say "can't judge this", as with `git bisect run`:
 
 ```bash
 whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
-```
-
-**A combination fails for a different reason**, such as a broken import or another
-assertion. `--match` counts a run as broken only if its output contains your
-real error:
-
-```bash
-whodunit --match "expected 5" -- npm test sum.test.ts
 ```
 
 **The test is flaky.** A test that sometimes fails on its own gives a
@@ -190,7 +200,10 @@ OPTIONS
                     times each. Catches a flaky test instead of trusting
                     it. Default: 1
   --match <text>    Only count a failure if the test's output contains this
-                    text. A run that fails some other way is skipped.
+                    text. Without it, whodunit compares each failure with
+                    the original one itself and skips different failures.
+  --any-failure     Count every non-zero exit as the failure, without
+                    comparing output.
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. 125 always counts,

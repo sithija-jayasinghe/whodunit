@@ -46,7 +46,10 @@ OPTIONS
                     times each. Catches a flaky test instead of trusting
                     it. Default: 1
   --match <text>    Only count a failure if the test's output contains this
-                    text. A run that fails some other way is skipped.
+                    text. Without it, whodunit compares each failure with
+                    the original one itself and skips different failures.
+  --any-failure     Count every non-zero exit as the failure, without
+                    comparing output.
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. ${SKIP_EXIT_CODE} always counts,
@@ -120,6 +123,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       "max-probes": { type: "string" },
       repeat: { type: "string" },
       match: { type: "string" },
+      "any-failure": { type: "boolean", default: false },
       "skip-exit-code": { type: "string", multiple: true, default: [] },
       verbose: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
@@ -261,6 +265,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       maxProbes,
       repeat,
       match,
+      anyFailure: values["any-failure"],
       link: values.link,
       onStep: (message) => {
         if (!json) process.stdout.write(`  ${message}...\n`);

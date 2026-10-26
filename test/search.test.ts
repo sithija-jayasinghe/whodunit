@@ -366,7 +366,8 @@ test("--match skips a combination that fails for a different reason", async () =
       (await readFile(mod5, "utf8")).replace("input * 50", "input * 50 * SCALE"),
   );
 
-  const unguarded = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
+  // --any-failure is the old, exit-code-only behavior, kept to show the trap.
+  const unguarded = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND, anyFailure: true });
   assert.deepEqual(unguarded.result?.culprits.map((hunk) => hunk.file), ["src/mod5.js"]);
 
   const guarded = await search({
@@ -393,4 +394,41 @@ test("--match says so when the current failure is not the expected one", async (
   assert.equal(report.searchable, false);
   assert.match(report.reason, /different error/);
   assert.match(report.reason, /FAIL calc3/);
+});
+
+test("without --match, a different failure is still recognised automatically", async () => {
+  // The same trap again, with no flags at all. mod5's change alone crashes on
+  // load, and its output shares no line with the real failure, so it must be
+  // skipped rather than blamed.
+  await commitGreen();
+  await writeProject(6, true);
+  const mod1 = join(repo, "src", "mod1.js");
+  await writeFile(mod1, `export const SCALE = 1;\n${await readFile(mod1, "utf8")}`);
+  const mod5 = join(repo, "src", "mod5.js");
+  await writeFile(
+    mod5,
+    `import { SCALE } from "./mod1.js";\n` +
+      (await readFile(mod5, "utf8")).replace("input * 50", "input * 50 * SCALE"),
+  );
+
+  const report = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
+
+  assert.deepEqual(report.result?.culprits.map((hunk) => hunk.file), ["src/mod6.js"]);
+  assert.deepEqual(report.signature, ["FAIL calc6"]);
+});
+
+test("finds two changes that only fail together, with no flags", { skip: process.platform === "win32" ? "uses bash" : false }, async () => {
+  // The two-change practice repo: each change is harmless alone. Splitting one
+  // of them into hunks makes a crashing state that a naive search blames.
+  const pair = join(root, "pair");
+  const script = new URL("./make-playground-pair.sh", import.meta.url).pathname;
+  await execOrThrow("bash", [script, pair], { cwd: root });
+
+  const report = await search({ repo: pair, baselineRef: "HEAD", testCommand: ["node", "test.js"] });
+
+  assert.equal(report.result?.minimal, true);
+  assert.deepEqual(
+    report.result?.culprits.map((hunk) => hunk.file).sort(),
+    ["src/invoice.js", "src/tax.js"],
+  );
 });

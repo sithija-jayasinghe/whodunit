@@ -1,4 +1,5 @@
 import { exec } from "../util/exec.js";
+import { matchesSignature } from "./signature.js";
 import type { TestResult } from "../types.js";
 
 export interface RunTestOptions {
@@ -12,6 +13,12 @@ export interface RunTestOptions {
    * broke for some other reason, and is "unresolved".
    */
   match?: string;
+  /**
+   * Lines identifying the original failure (see signature.ts). Used when
+   * there is no `match`: a failure that prints none of them is a different
+   * failure. Empty or absent means any failure counts.
+   */
+  signature?: readonly string[];
   env?: NodeJS.ProcessEnv;
   /** Stop the run. The call then rejects instead of returning a result. */
   signal?: AbortSignal;
@@ -64,9 +71,11 @@ export async function runTest(
   const failed = result.exitCode !== 0 && !result.timedOut && !skipExitCodes.includes(result.exitCode);
   const otherFailure =
     failed &&
-    options.match !== undefined &&
-    !result.stdout.includes(options.match) &&
-    !result.stderr.includes(options.match);
+    (options.match !== undefined
+      ? !result.stdout.includes(options.match) && !result.stderr.includes(options.match)
+      : options.signature !== undefined &&
+        options.signature.length > 0 &&
+        !matchesSignature(result, options.signature));
 
   return {
     outcome:
@@ -93,10 +102,10 @@ export function explainUnresolved(which: string, result: TestResult, match?: str
     return `The ${which} test timed out. Narrow the test command or raise --timeout.`;
   }
   if (result.otherFailure) {
-    return (
-      `The ${which} test failed with a different error: its output does not contain ` +
-      `"${match}". Check the --match text against the test's output (--verbose shows it).`
-    );
+    return match === undefined
+      ? `The ${which} test failed with a different error from the original failure.`
+      : `The ${which} test failed with a different error: its output does not contain ` +
+          `"${match}". Check the --match text against the test's output (--verbose shows it).`;
   }
   return `The ${which} test exited ${result.exitCode}, which means skip, so it cannot be judged.`;
 }

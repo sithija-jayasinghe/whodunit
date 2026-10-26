@@ -154,8 +154,17 @@ const match = {
   type: "string",
   description:
     "Text the test's output must contain for a failure to count, such as the assertion " +
-    "message of the failure being hunted. A run that fails some other way (a different " +
-    "test, an import error) is skipped instead of being taken for the culprit.",
+    "message of the failure being hunted. Optional: without it, whodunit compares each " +
+    "failing run with the original failure itself, and skips runs that broke some other " +
+    "way (an import error, a different test). Pass it to pin the failure exactly.",
+};
+
+const anyFailure = {
+  type: "boolean",
+  description:
+    "Count every non-zero exit as the failure. By default whodunit compares each failing " +
+    "run's output with the original failure and skips runs that broke some other way. " +
+    "Only set this if the test prints different output every time it fails.",
 };
 
 const maxProbes = {
@@ -166,7 +175,7 @@ const maxProbes = {
 
 const searchSchema = {
   type: "object",
-  properties: { cwd, command, since, timeoutMs, maxProbes, repeat, match, skipExitCodes, context, verbose },
+  properties: { cwd, command, since, timeoutMs, maxProbes, repeat, match, anyFailure, skipExitCodes, context, verbose },
   required: ["cwd", "command"],
   additionalProperties: false,
 };
@@ -209,6 +218,7 @@ export const TOOLS: readonly Tool[] = [
         maxProbes: optionalInteger(args, "maxProbes", 1),
         repeat: optionalInteger(args, "repeat", 1),
         match: optionalString(args, "match"),
+        anyFailure: optionalBoolean(args, "anyFailure"),
         skipExitCodes: skipCodesArgument(args),
         contextLines: optionalInteger(args, "context", 0),
       };

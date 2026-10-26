@@ -92,6 +92,8 @@ export function searchToJson(report: SearchReport, options: JsonOptions = {}) {
     flaky: report.flaky ?? null,
     /** The --match text, or null. */
     match: report.match ?? null,
+    /** Lines whodunit used to recognise the original failure, or null. */
+    signature: report.signature ?? null,
     testRuns: report.testRuns,
     elapsedMs: report.elapsedMs,
   };

@@ -1,6 +1,7 @@
 import { createSandbox } from "../git/worktree.js";
 import { applySubset } from "../diff/apply.js";
 import { disagree, explainFlaky, explainUnresolved, runRepeated, runTest } from "../runner/test.js";
+import { failureSignature } from "../runner/signature.js";
 import { ddmin, type Probe, type ProbeEvent, type SearchResult } from "../search/ddmin.js";
 import { listHunks } from "./hunks.js";
 import type { FilePatch, Flakiness, Hunk, Outcome, TestResult } from "../types.js";
@@ -17,6 +18,11 @@ export interface SearchOptions {
   skipExitCodes?: readonly number[];
   /** Text a failing run must print to count as the failure being hunted. */
   match?: string;
+  /**
+   * Count any non-zero exit as the failure. Turns off the automatic check
+   * that a failing run printed the same failure as the current tree.
+   */
+  anyFailure?: boolean;
   maxProbes?: number;
   /**
    * Run the baseline, the current tree and the final answer this many times
@@ -68,6 +74,12 @@ export interface SearchReport {
   repeat: number;
   /** The --match text, when one was given. */
   match?: string;
+  /**
+   * The lines that identified the original failure, when whodunit worked them
+   * out itself. A failing run that printed none of them was a different
+   * failure and was skipped.
+   */
+  signature?: string[];
   /**
    * Set when re-running the same code gave a different outcome. At the
    * baseline or current tree it stops the search; at "confirm" the result is
@@ -129,6 +141,10 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
   const sandbox = await createSandbox(repo, baselineCommit, { link: options.link });
   const preserve = sandbox.linked;
 
+  // Filled in once the current tree has failed, then used to tell that
+  // failure apart from others. See signature.ts.
+  let signature: string[] = [];
+
   const run = async (kind: "baseline" | "current" | "probe" | "confirm", subset: readonly Hunk[]) => {
     testRuns++;
     const result = await runTest(testCommand, {
@@ -136,6 +152,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       timeoutMs: options.timeoutMs,
       skipExitCodes: options.skipExitCodes,
       match: options.match,
+      signature,
       signal,
     });
     options.onRun?.({ kind, subset, result });
@@ -247,6 +264,14 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       });
     }
 
+    if (options.match === undefined && !options.anyFailure) {
+      signature = failureSignature(baseline, current);
+      if (signature.length > 0) {
+        const more = signature.length > 1 ? ` (and ${signature.length - 1} more line${signature.length > 2 ? "s" : ""})` : "";
+        onStep(`Matching failures to "${signature[0]}"${more}`);
+      }
+    }
+
     onStep("Searching");
     const result = await ddmin(hunks, probe, {
       maxProbes: options.maxProbes ?? DEFAULT_MAX_PROBES,
@@ -270,6 +295,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       current,
       result,
       searchable: true,
+      ...(signature.length > 0 ? { signature } : {}),
       ...(flaky ? { flaky } : {}),
       reason: flaky
         ? `The answer did not hold up when re-run: it gave ${flaky.outcomes.join(", then ")}. ` +
