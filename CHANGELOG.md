@@ -5,9 +5,17 @@ All notable changes to whodunit are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Until 1.0, a minor version may
 change behavior.
 
+## [0.1.1] - 2026-10-26
+
+The first release on npm, and otherwise identical to 0.1.0.
+
+0.1.0 could not be published: an unrelated package named `whodunit` released
+that version in 2015 before being removed, and npm never lets a version number
+be reused. The `v0.1.0` tag in git marks the same code.
+
 ## [0.1.0] - 2026-10-26
 
-The first release.
+The first release. Tagged in git, not published to npm (see 0.1.1).
 
 ### Added
 
@@ -35,4 +43,5 @@ The first release.
   and remove the sandbox before exiting.
 - No runtime dependencies.
 
+[0.1.1]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sithija-jayasinghe/whodunit/releases/tag/v0.1.0
