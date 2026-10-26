@@ -5,7 +5,10 @@ All notable changes to whodunit are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Until 1.0, a minor version may
 change behavior.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-26
+
+Makes the default answer trustworthy when a combination of changes breaks the
+code in some other way.
 
 ### Changed
 
@@ -78,7 +81,7 @@ The first release. Tagged in git, not published to npm (see 0.1.1).
   and remove the sandbox before exiting.
 - No runtime dependencies.
 
-[Unreleased]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sithija-jayasinghe/whodunit/releases/tag/v0.1.0
