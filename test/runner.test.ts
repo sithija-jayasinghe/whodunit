@@ -41,3 +41,26 @@ test("a timeout is unresolved", async () => {
   assert.equal(result.outcome, "unresolved");
   assert.equal(result.timedOut, true);
 });
+
+function failWith(stream: "stdout" | "stderr", text: string): string[] {
+  return [process.execPath, "-e", `process.${stream}.write(${JSON.stringify(text)}); process.exit(1)`];
+}
+
+test("with match, only a failure that prints the text counts as a fail", async () => {
+  const options = { cwd, match: "expected 5" };
+
+  const same = await runTest(failWith("stdout", "FAIL sum: got -1, expected 5\n"), options);
+  assert.equal(same.outcome, "fail");
+  assert.equal(same.otherFailure, false);
+
+  const other = await runTest(failWith("stderr", "SyntaxError: unexpected token\n"), options);
+  assert.equal(other.outcome, "unresolved", "a different failure cannot be judged");
+  assert.equal(other.otherFailure, true);
+});
+
+test("with match, the text may be on stderr, and a pass is still a pass", async () => {
+  const options = { cwd, match: "expected 5" };
+
+  assert.equal((await runTest(failWith("stderr", "expected 5\n"), options)).outcome, "fail");
+  assert.equal((await runTest(exitWith(0), options)).outcome, "pass");
+});

@@ -41,8 +41,9 @@ export type Outcome =
   /** Test failed the way we are hunting: this state is bad. */
   | "fail"
   /**
-   * We could not tell. The patch would not apply, the command timed out, or
-   * it exited with a skip code (125 by default) to say the build broke.
+   * We could not tell. The patch would not apply, the command timed out, it
+   * exited with a skip code (125 by default) to say the build broke, or it
+   * failed without printing the --match text.
    * Delta debugging treats this as "skip" rather than folding it into pass or
    * fail.
    */
@@ -55,6 +56,11 @@ export interface TestResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /**
+   * The command failed, but its output did not contain the --match text, so
+   * it broke for some other reason. Counted as "unresolved", not "fail".
+   */
+  otherFailure: boolean;
 }
 
 /**

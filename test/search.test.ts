@@ -350,3 +350,47 @@ test("doctor --repeat reports a flaky current tree", async () => {
   assert.equal(report.flaky?.stage, "current");
   assert.deepEqual(report.flaky?.outcomes, ["fail", "pass"]);
 });
+
+test("--match skips a combination that fails for a different reason", async () => {
+  // The same trap as the build-break test, but with no wrapper exiting 125:
+  // mod5's change alone fails to load, which also exits 1. Without --match the
+  // search cannot tell that apart from the real failure, so it blames mod5.
+  await commitGreen();
+  await writeProject(6, true);
+  const mod1 = join(repo, "src", "mod1.js");
+  await writeFile(mod1, `export const SCALE = 1;\n${await readFile(mod1, "utf8")}`);
+  const mod5 = join(repo, "src", "mod5.js");
+  await writeFile(
+    mod5,
+    `import { SCALE } from "./mod1.js";\n` +
+      (await readFile(mod5, "utf8")).replace("input * 50", "input * 50 * SCALE"),
+  );
+
+  const unguarded = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
+  assert.deepEqual(unguarded.result?.culprits.map((hunk) => hunk.file), ["src/mod5.js"]);
+
+  const guarded = await search({
+    repo,
+    baselineRef: "HEAD",
+    testCommand: TEST_COMMAND,
+    match: "FAIL calc6",
+  });
+  assert.deepEqual(guarded.result?.culprits.map((hunk) => hunk.file), ["src/mod6.js"]);
+  assert.equal(guarded.match, "FAIL calc6");
+});
+
+test("--match says so when the current failure is not the expected one", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+
+  const report = await search({
+    repo,
+    baselineRef: "HEAD",
+    testCommand: TEST_COMMAND,
+    match: "FAIL calc3",
+  });
+
+  assert.equal(report.searchable, false);
+  assert.match(report.reason, /different error/);
+  assert.match(report.reason, /FAIL calc3/);
+});

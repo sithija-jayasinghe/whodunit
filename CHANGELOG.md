@@ -14,6 +14,11 @@ change behavior.
   reported as flaky instead of producing a confident wrong answer. Available
   as `repeat` on the MCP `whodunit_search` and `whodunit_doctor` tools, and
   reported as `repeat` and `flaky` in `--json` output.
+- `--match <text>` counts a failing run only if its output contains that
+  text. A combination of changes that fails some other way, such as a broken
+  import or a different assertion, is skipped instead of being blamed.
+  Available as `match` on the MCP tools, and reported as `match` (and
+  `otherFailure` per run) in `--json` output.
 
 ## [0.1.1] - 2026-10-26
 

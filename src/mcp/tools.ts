@@ -150,6 +150,14 @@ const repeat = {
     "and the answer must not be trusted. Default: 1. Use 2 or 3 if the test might be flaky.",
 };
 
+const match = {
+  type: "string",
+  description:
+    "Text the test's output must contain for a failure to count, such as the assertion " +
+    "message of the failure being hunted. A run that fails some other way (a different " +
+    "test, an import error) is skipped instead of being taken for the culprit.",
+};
+
 const maxProbes = {
   type: "integer",
   minimum: 1,
@@ -158,14 +166,14 @@ const maxProbes = {
 
 const searchSchema = {
   type: "object",
-  properties: { cwd, command, since, timeoutMs, maxProbes, repeat, skipExitCodes, context, verbose },
+  properties: { cwd, command, since, timeoutMs, maxProbes, repeat, match, skipExitCodes, context, verbose },
   required: ["cwd", "command"],
   additionalProperties: false,
 };
 
 const doctorSchema = {
   type: "object",
-  properties: { cwd, command, since, timeoutMs, repeat, skipExitCodes, verbose },
+  properties: { cwd, command, since, timeoutMs, repeat, match, skipExitCodes, verbose },
   required: ["cwd", "command"],
   additionalProperties: false,
 };
@@ -200,6 +208,7 @@ export const TOOLS: readonly Tool[] = [
         timeoutMs: optionalInteger(args, "timeoutMs", 1),
         maxProbes: optionalInteger(args, "maxProbes", 1),
         repeat: optionalInteger(args, "repeat", 1),
+        match: optionalString(args, "match"),
         skipExitCodes: skipCodesArgument(args),
         contextLines: optionalInteger(args, "context", 0),
       };
@@ -234,6 +243,7 @@ export const TOOLS: readonly Tool[] = [
         testCommand: commandArgument(args),
         timeoutMs: optionalInteger(args, "timeoutMs", 1),
         repeat: optionalInteger(args, "repeat", 1),
+        match: optionalString(args, "match"),
         skipExitCodes: skipCodesArgument(args),
         signal: context.signal,
         onStep: (message) => context.progress(message),

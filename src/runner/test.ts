@@ -7,6 +7,11 @@ export interface RunTestOptions {
   timeoutMs?: number;
   /** Exit codes that mean "cannot judge this state". Default: 125. */
   skipExitCodes?: readonly number[];
+  /**
+   * Text the output must contain for a failure to count. A failure without it
+   * broke for some other reason, and is "unresolved".
+   */
+  match?: string;
   env?: NodeJS.ProcessEnv;
   /** Stop the run. The call then rejects instead of returning a result. */
   signal?: AbortSignal;
@@ -27,6 +32,10 @@ export const SKIP_EXIT_CODE = 125;
  * a skip code (125 unless told otherwise) or a timeout means we could not
  * tell, and any other exit code means it is bad. That is all whodunit needs,
  * and it is why the tool works with any language and any test runner.
+ *
+ * With `match`, a failure must also print that text to count. Otherwise a
+ * combination of hunks that breaks something else -- a different test, an
+ * import -- would be taken for the failure being hunted.
  *
  * The skip code matters more than it looks. A subset of hunks that does not
  * compile exits non-zero just like a real failure, and the search would happily
@@ -52,9 +61,16 @@ export async function runTest(
   });
   const durationMs = Date.now() - startedAt;
 
+  const failed = result.exitCode !== 0 && !result.timedOut && !skipExitCodes.includes(result.exitCode);
+  const otherFailure =
+    failed &&
+    options.match !== undefined &&
+    !result.stdout.includes(options.match) &&
+    !result.stderr.includes(options.match);
+
   return {
     outcome:
-      result.timedOut || skipExitCodes.includes(result.exitCode)
+      result.timedOut || skipExitCodes.includes(result.exitCode) || otherFailure
         ? "unresolved"
         : result.exitCode === 0
           ? "pass"
@@ -64,6 +80,7 @@ export async function runTest(
     stdout: result.stdout,
     stderr: result.stderr,
     timedOut: result.timedOut,
+    otherFailure,
   };
 }
 
@@ -71,10 +88,17 @@ export async function runTest(
  * Explain an "unresolved" baseline or current run, which leaves nothing to
  * search. `which` names the run, e.g. "baseline".
  */
-export function explainUnresolved(which: string, result: TestResult): string {
-  return result.timedOut
-    ? `The ${which} test timed out. Narrow the test command or raise --timeout.`
-    : `The ${which} test exited ${result.exitCode}, which means skip, so it cannot be judged.`;
+export function explainUnresolved(which: string, result: TestResult, match?: string): string {
+  if (result.timedOut) {
+    return `The ${which} test timed out. Narrow the test command or raise --timeout.`;
+  }
+  if (result.otherFailure) {
+    return (
+      `The ${which} test failed with a different error: its output does not contain ` +
+      `"${match}". Check the --match text against the test's output (--verbose shows it).`
+    );
+  }
+  return `The ${which} test exited ${result.exitCode}, which means skip, so it cannot be judged.`;
 }
 
 /**

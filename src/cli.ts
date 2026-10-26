@@ -45,6 +45,8 @@ OPTIONS
   --repeat <n>      Run the baseline, the current tree and the answer n
                     times each. Catches a flaky test instead of trusting
                     it. Default: 1
+  --match <text>    Only count a failure if the test's output contains this
+                    text. A run that fails some other way is skipped.
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. ${SKIP_EXIT_CODE} always counts,
@@ -78,7 +80,11 @@ function describe(result: TestResult): string {
   const seconds = (result.durationMs / 1000).toFixed(1);
   const label =
     result.outcome === "pass" ? "PASS" : result.outcome === "fail" ? "FAIL" : "UNRESOLVED";
-  const detail = result.timedOut ? "timed out" : `exit ${result.exitCode}`;
+  const detail = result.timedOut
+    ? "timed out"
+    : result.otherFailure
+      ? `exit ${result.exitCode}, different error`
+      : `exit ${result.exitCode}`;
   return `${label}  (${detail}, ${seconds}s)`;
 }
 
@@ -113,6 +119,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       context: { type: "string" },
       "max-probes": { type: "string" },
       repeat: { type: "string" },
+      match: { type: "string" },
       "skip-exit-code": { type: "string", multiple: true, default: [] },
       verbose: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
@@ -183,6 +190,10 @@ async function main(argv: string[], json: boolean): Promise<number> {
   if (repeat !== undefined && (!Number.isInteger(repeat) || repeat < 1)) {
     return fail("--repeat must be a whole number of at least 1.");
   }
+  const match = values.match;
+  if (match !== undefined && match.trim() === "") {
+    return fail("--match needs some text to look for.");
+  }
 
   if (command === "doctor") {
     const report = await checkPreconditions({
@@ -192,6 +203,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       timeoutMs,
       skipExitCodes,
       repeat,
+      match,
       link: values.link,
       onStep: (message) => {
         if (!json) process.stdout.write(`  ${message}...\n`);
@@ -248,6 +260,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       skipExitCodes,
       maxProbes,
       repeat,
+      match,
       link: values.link,
       onStep: (message) => {
         if (!json) process.stdout.write(`  ${message}...\n`);

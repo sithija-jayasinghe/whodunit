@@ -15,6 +15,8 @@ export interface SearchOptions {
   timeoutMs?: number;
   /** Exit codes that mean "cannot judge this state". Default: 125. */
   skipExitCodes?: readonly number[];
+  /** Text a failing run must print to count as the failure being hunted. */
+  match?: string;
   maxProbes?: number;
   /**
    * Run the baseline, the current tree and the final answer this many times
@@ -64,6 +66,8 @@ export interface SearchReport {
   reason: string;
   /** How many times each check was run. */
   repeat: number;
+  /** The --match text, when one was given. */
+  match?: string;
   /**
    * Set when re-running the same code gave a different outcome. At the
    * baseline or current tree it stops the search; at "confirm" the result is
@@ -101,13 +105,14 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
 
   let testRuns = 0;
   const finish = (
-    outcome: Omit<SearchReport, keyof typeof listing | "repeat" | "testRuns" | "elapsedMs">,
+    outcome: Omit<SearchReport, keyof typeof listing | "repeat" | "match" | "testRuns" | "elapsedMs">,
   ): SearchReport => ({
     baselineCommit,
     snapshotCommit,
     patches,
     hunks,
     repeat,
+    ...(options.match !== undefined ? { match: options.match } : {}),
     ...outcome,
     testRuns,
     elapsedMs: Date.now() - startedAt,
@@ -130,6 +135,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       cwd: sandbox.path,
       timeoutMs: options.timeoutMs,
       skipExitCodes: options.skipExitCodes,
+      match: options.match,
       signal,
     });
     options.onRun?.({ kind, subset, result });
@@ -203,7 +209,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         searchable: false,
         reason:
           baseline.outcome === "unresolved"
-            ? explainUnresolved("baseline", baseline)
+            ? explainUnresolved("baseline", baseline, options.match)
             : "The test already fails at the baseline, so these changes did not break it.",
       });
     }
@@ -237,7 +243,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         reason:
           current.outcome === "pass"
             ? "The test passes with every change applied. Nothing is broken."
-            : explainUnresolved("current", current),
+            : explainUnresolved("current", current, options.match),
       });
     }
 

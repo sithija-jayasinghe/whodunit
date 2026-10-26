@@ -19,6 +19,8 @@ export interface PreconditionReport {
   reason: string;
   /** How many times each side was run. */
   repeat: number;
+  /** The --match text, when one was given. */
+  match?: string;
   /** Set when re-running the same side gave a different outcome. */
   flaky?: Flakiness;
 }
@@ -43,11 +45,14 @@ export async function checkPreconditions(options: {
   signal?: AbortSignal;
   /** Run each side this many times, to catch a flaky test. Default: 1. */
   repeat?: number;
+  /** Text a failing run must print to count as the failure being hunted. */
+  match?: string;
   onStep?: (message: string) => void;
 }): Promise<PreconditionReport> {
   const { repo, baselineRef, testCommand, timeoutMs, skipExitCodes, link, signal, onStep = () => {} } =
     options;
   const repeat = options.repeat ?? 1;
+  const { match } = options;
 
   const baselineCommit = await resolveRef(repo, baselineRef);
   const dirty = await isDirty(repo);
@@ -63,7 +68,7 @@ export async function checkPreconditions(options: {
     const baselineSandbox = await createSandbox(repo, baselineCommit, { link });
     try {
       baselines = await runRepeated(repeat, () =>
-        runTest(testCommand, { cwd: baselineSandbox.path, timeoutMs, skipExitCodes, signal }),
+        runTest(testCommand, { cwd: baselineSandbox.path, timeoutMs, skipExitCodes, match, signal }),
       );
     } finally {
       await baselineSandbox.dispose();
@@ -75,7 +80,7 @@ export async function checkPreconditions(options: {
     try {
       linked = currentSandbox.linked;
       currents = await runRepeated(repeat, () =>
-        runTest(testCommand, { cwd: currentSandbox.path, timeoutMs, skipExitCodes, signal }),
+        runTest(testCommand, { cwd: currentSandbox.path, timeoutMs, skipExitCodes, match, signal }),
       );
     } finally {
       await currentSandbox.dispose();
@@ -99,12 +104,12 @@ export async function checkPreconditions(options: {
   } else if (baseline.outcome !== "pass") {
     reason =
       baseline.outcome === "unresolved"
-        ? explainUnresolved("baseline", baseline)
+        ? explainUnresolved("baseline", baseline, match)
         : "The test already fails at the baseline, so the change did not break it.";
   } else if (current.outcome === "pass") {
     reason = "The test passes on the current tree. Nothing is broken.";
   } else if (current.outcome === "unresolved") {
-    reason = explainUnresolved("current", current);
+    reason = explainUnresolved("current", current, match);
   } else {
     reason = "Baseline passes and the current tree fails. Ready to search.";
     searchable = true;
@@ -122,6 +127,7 @@ export async function checkPreconditions(options: {
     searchable,
     reason,
     repeat,
+    ...(match !== undefined ? { match } : {}),
     ...(flaky ? { flaky } : {}),
   };
 }

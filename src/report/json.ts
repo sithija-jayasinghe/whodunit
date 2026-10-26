@@ -36,6 +36,8 @@ export interface JsonRun {
   outcome: TestResult["outcome"];
   exitCode: number;
   timedOut: boolean;
+  /** Failed, but without the --match text: a different failure. */
+  otherFailure: boolean;
   durationMs: number;
   stdout?: string;
   stderr?: string;
@@ -63,6 +65,7 @@ function runToJson(result: TestResult | undefined, options: JsonOptions): JsonRu
     outcome: result.outcome,
     exitCode: result.exitCode,
     timedOut: result.timedOut,
+    otherFailure: result.otherFailure,
     durationMs: result.durationMs,
     ...(options.verbose ? { stdout: result.stdout, stderr: result.stderr } : {}),
   };
@@ -87,6 +90,8 @@ export function searchToJson(report: SearchReport, options: JsonOptions = {}) {
     repeat: report.repeat,
     /** Set when re-running the same code gave a different outcome. */
     flaky: report.flaky ?? null,
+    /** The --match text, or null. */
+    match: report.match ?? null,
     testRuns: report.testRuns,
     elapsedMs: report.elapsedMs,
   };
@@ -108,6 +113,7 @@ export function preconditionsToJson(report: PreconditionReport, options: JsonOpt
     current: runToJson(report.current, options),
     repeat: report.repeat,
     flaky: report.flaky ?? null,
+    match: report.match ?? null,
   };
 }
 

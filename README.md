@@ -129,6 +129,8 @@ OPTIONS
   --repeat <n>      Run the baseline, the current tree and the answer n
                     times each. Catches a flaky test instead of trusting
                     it. Default: 1
+  --match <text>    Only count a failure if the test's output contains this
+                    text. A run that fails some other way is skipped.
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. 125 always counts,
@@ -169,8 +171,30 @@ whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
 ```
 
 If your tool already uses a different exit code for build errors, pass it with
-`--skip-exit-code`. A timeout also counts as "cannot judge", and the timeout
+`--skip-exit-code`. Or use `--match`, below, which needs no wrapper. A timeout also counts as "cannot judge", and the timeout
 kills everything the test started, not just the top process.
+
+### When a combination fails for a different reason
+
+Some combinations of changes break something other than the failure you are
+hunting: an import that no longer resolves, a different assertion, a crash
+before your test even runs. Each of those exits non-zero too, and the search
+would follow it to the wrong change.
+
+Pass the text of your real failure with `--match`:
+
+```bash
+whodunit --match "expected 5" -- npm test sum.test.ts
+```
+
+A run only counts as broken if its output (stdout or stderr) contains that
+text. A run that fails without it is treated as "cannot judge", like exit 125.
+Use part of the assertion message: specific enough to identify this failure,
+short enough not to depend on values that change between runs.
+
+If the current tree itself fails without the text, whodunit stops and says so,
+since that usually means the `--match` text is wrong. `--verbose` shows what
+the test actually printed.
 
 ### Flaky tests
 
