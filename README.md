@@ -1,19 +1,24 @@
 # whodunit
 
 [![CI](https://github.com/sithija-jayasinghe/whodunit/actions/workflows/ci.yml/badge.svg)](https://github.com/sithija-jayasinghe/whodunit/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/whodunit)](https://www.npmjs.com/package/whodunit)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
+[![node](https://img.shields.io/node/v/whodunit)](package.json)
+[![license](https://img.shields.io/npm/l/whodunit)](LICENSE)
 
-**Find which single change broke your test.**
+**Find which change broke your test — and prove it.**
 
-An AI agent just changed 12 files. Your test is red. Instead of reading a diff
-you did not write, run:
+An AI agent just edited 13 files. A test that passed is now red. Instead of
+reading a diff you did not write, run one command:
 
 ```bash
-whodunit -- node test.js
+npx whodunit -- npm test auth.test.ts
 ```
 
-whodunit splits the change into individual hunks and searches them against
-your failing test until it finds the smallest set that still reproduces the
-failure. It does not guess — it proves the answer by running your test.
+whodunit splits your uncommitted changes into individual hunks and runs your
+test against subsets of them until it isolates the smallest set that still
+breaks it. It does not guess. It has watched the test pass without the
+culprit and fail with it.
 
 ```
   Snapshotting working tree...
@@ -43,56 +48,72 @@ failure. It does not guess — it proves the answer by running your test.
   11 test runs in 1.1s.
 ```
 
-That is real output, from the fixture `test/make-fixture.sh` builds.
+Real output, from the fixture that [`test/make-fixture.sh`](test/make-fixture.sh) builds: 37 changes across 13 files.
 
-## Why not just use rewind?
+- **Proof, not a guess.** Every answer is backed by test runs you can see.
+- **Safe.** It works in a throwaway copy. Your files are never touched, even if you press Ctrl+C.
+- **Built for agents.** A built-in [MCP](https://modelcontextprotocol.io) server lets Claude Code and other agents run it on their own changes.
+- **Any language.** It only needs a test command that exits 0 when things are fine.
+- **Zero runtime dependencies.** TypeScript on Node and Git, nothing else.
 
-Claude Code and Cursor can undo a whole change. That throws away the good files
-to remove the one bad line, and it never tells you what was wrong. whodunit
-keeps the good and isolates the bad.
+## Contents
 
-An AI can also *read* the diff and guess the cause. Sometimes it is right.
-whodunit runs the test, so when it names a change it has watched the test pass
-without it and fail with it.
+- [Why](#why)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Use it from an AI agent](#use-it-from-an-ai-agent)
+- [Real tests are messy](#real-tests-are-messy)
+- [Reference](#reference)
+- [Under the hood](#under-the-hood)
+- [Known limits](#known-limits)
+
+## Why
+
+Coding agents make large edits fast. When one of those edits breaks a test,
+you have three options, and two are bad:
+
+| Option | Problem |
+|---|---|
+| Undo the whole change (rewind) | Throws away the good edits with the bad one, and never tells you what was wrong. |
+| Read the diff, or ask an AI to | A guess. Sometimes right, often confidently wrong. |
+| **Run whodunit** | Keeps the good edits, names the bad one, and proves it by running the test. |
 
 ## How it works
 
-It is [delta debugging](https://en.wikipedia.org/wiki/Delta_debugging)
-(Zeller's ddmin) applied to diff hunks rather than to program input.
+```mermaid
+flowchart LR
+    A["Your uncommitted<br/>changes"] --> B["Snapshot them<br/>as a hidden commit"]
+    B --> C["Split into<br/>hunks"]
+    C --> D["Apply a subset in a<br/>throwaway git worktree"]
+    D --> E["Run your test:<br/>pass, fail, or can't tell"]
+    E --> F["ddmin picks the<br/>next subset"]
+    F --> D
+    F --> G["Smallest set that<br/>still fails: the culprit"]
+```
 
-A plain binary search is not enough, because hunks are not independent —
-applying half a change often will not compile, and a failure can need two
-changes together. ddmin handles that with a third outcome, `unresolved`, and
-widens granularity instead of giving up.
+The search is [delta debugging](https://en.wikipedia.org/wiki/Delta_debugging)
+(Andreas Zeller's *ddmin* algorithm), applied to diff hunks instead of to
+program input.
 
-Everything happens in a throwaway `git worktree` under your temp directory.
-**Your real working tree is never modified**, and the sandbox is removed when
-the run ends — including when you press Ctrl+C.
+A plain binary search would not work. Changes depend on each other: half of a
+refactor often will not compile, and some failures need two changes together.
+ddmin handles both. It has a third outcome, *can't tell*, for states it cannot
+judge, and when splitting in half does not narrow things down it splits finer
+instead of giving up. The answer is *1-minimal*: remove any one of the changes
+it names and the test passes.
 
-## Install
+One culprit among 100 changes typically takes 12 test runs.
+
+## Quick start
 
 ```bash
 npm install -g whodunit
 ```
 
-Or run it without installing, as `npx whodunit -- <test command>`.
+Or skip installing and use `npx whodunit` in its place.
 
-From a clone instead:
-
-```bash
-npm install
-npm run build
-npm link
-```
-
-`npm link` puts your checkout's `whodunit` on your PATH. To run it without
-linking, use `node dist/cli.js` in its place, or `npx tsx src/cli.ts` to skip
-the build.
-
-## Usage
-
-Start with `doctor`. It runs your test twice, once at the baseline and once on
-your current tree, and tells you whether there is anything to search:
+Check there is something to search. This runs your test once on your last
+commit and once on your current files:
 
 ```bash
 whodunit doctor -- npm test auth.test.ts
@@ -104,8 +125,71 @@ Then search:
 whodunit -- npm test auth.test.ts
 ```
 
-Point it at the one failing test, not the whole suite. The search runs it many
-times.
+Point it at the one failing test, not the whole suite: the search runs it many
+times. By default it searches your uncommitted changes. Add `--since HEAD~1` to
+include the last commit.
+
+## Use it from an AI agent
+
+`whodunit mcp` is an [MCP](https://modelcontextprotocol.io) server, so a coding
+agent can find what broke right after breaking it. With Claude Code:
+
+```bash
+claude mcp add whodunit -- npx -y whodunit mcp
+```
+
+Any MCP client works with the same command over stdio. It provides three tools:
+
+| Tool | Does |
+|---|---|
+| `whodunit_search` | Finds the culprit. Returns the same object as `--json`. |
+| `whodunit_doctor` | Checks there is a regression to search, without searching. |
+| `whodunit_hunks` | Lists the changes. Runs no tests. |
+
+Searches report progress as they go, and cancelling a call stops the search at
+once: the running test is killed and its sandbox removed.
+
+## Real tests are messy
+
+Three things can send a naive search the wrong way. whodunit has an answer to
+each.
+
+**A combination does not build.** Leave out the change that defines a function
+and keep the one that calls it, and the build fails. That looks like a test
+failure. Exit **125** to say "can't judge this", as with `git bisect run`:
+
+```bash
+whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
+```
+
+**A combination fails for a different reason**, such as a broken import or another
+assertion. `--match` counts a run as broken only if its output contains your
+real error:
+
+```bash
+whodunit --match "expected 5" -- npm test sum.test.ts
+```
+
+**The test is flaky.** A test that sometimes fails on its own gives a
+confident wrong answer. `--repeat 3` runs the starting points three times
+before searching and re-runs the answer three times after, and refuses to
+report a result the test cannot reproduce:
+
+```
+  CANNOT SEARCH  The test is flaky: the baseline gave pass, then fail on the
+  same code. A search would give a wrong answer, so fix or skip the flaky test
+  first.
+```
+
+Against a test made to fail at random half the time, five searches without
+`--repeat` said "found it" twice, once naming two changes when only one was
+broken, and three times wrongly blamed the code before the changes. With
+`--repeat 3`, all five were caught.
+
+## Reference
+
+<details>
+<summary><b>All commands and options</b></summary>
 
 ```
 whodunit [options] -- <test command>
@@ -145,10 +229,10 @@ OPTIONS
   -v, --version     Show version
 ```
 
-The baseline is `HEAD` by default, so whodunit searches your uncommitted
-changes. To search the last commit as well, use `--since HEAD~1`.
+</details>
 
-### Exit codes
+<details>
+<summary><b>Exit codes</b></summary>
 
 | Code | Meaning |
 |---|---|
@@ -157,84 +241,13 @@ changes. To search the last commit as well, use `--since HEAD~1`.
 | 2 | Bad usage: an unknown option or an invalid value |
 | 130 / 143 | Interrupted by Ctrl+C / SIGTERM, after cleaning up |
 
-### When a combination does not build
+</details>
 
-Leaving some hunks out can break the build — a function used but no longer
-defined. That exits non-zero just like a real failure, and the search would
-blame the hunk that broke the *build* instead of the one that broke the *test*.
-
-Exit **125** to say "cannot judge this state", the same convention as
-`git bisect run`:
-
-```bash
-whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
-```
-
-If your tool already uses a different exit code for build errors, pass it with
-`--skip-exit-code`. Or use `--match`, below, which needs no wrapper. A timeout also counts as "cannot judge", and the timeout
-kills everything the test started, not just the top process.
-
-### When a combination fails for a different reason
-
-Some combinations of changes break something other than the failure you are
-hunting: an import that no longer resolves, a different assertion, a crash
-before your test even runs. Each of those exits non-zero too, and the search
-would follow it to the wrong change.
-
-Pass the text of your real failure with `--match`:
-
-```bash
-whodunit --match "expected 5" -- npm test sum.test.ts
-```
-
-A run only counts as broken if its output (stdout or stderr) contains that
-text. A run that fails without it is treated as "cannot judge", like exit 125.
-Use part of the assertion message: specific enough to identify this failure,
-short enough not to depend on values that change between runs.
-
-If the current tree itself fails without the text, whodunit stops and says so,
-since that usually means the `--match` text is wrong. `--verbose` shows what
-the test actually printed.
-
-### Flaky tests
-
-whodunit trusts your test's exit code. A test that sometimes fails for no
-reason will send the search the wrong way, and it will still say "found it".
-
-`--repeat 3` guards against that. It runs the baseline and the current tree
-three times each before searching, and stops if they do not agree:
-
-```
-  CANNOT SEARCH  The test is flaky: the baseline gave pass, then fail on the
-  same code. A search would give a wrong answer, so fix or skip the flaky test
-  first.
-```
-
-After the search it re-runs the answer three times too: the culprits must fail
-every time, and with any one of them removed they must never fail. If that
-does not hold, the result is reported as not trustworthy and the exit code is 1.
-
-The search's own runs are not repeated, so the extra cost is a few runs, not
-three times as many.
-
-### Seeing what the test printed
-
-`--verbose` prints each run's output under the line that started it:
-
-```
-    [ 2]    1 of 3    FAIL
-           | FAIL sum: got -1, expected 5
-```
-
-### JSON output
+<details>
+<summary><b>JSON output</b></summary>
 
 `--json` works with the search, `doctor`, `hunks` and `prune`. stdout is then
-exactly one JSON document, so a script or an agent can parse it without
-scraping text:
-
-```bash
-whodunit --json -- npm test auth.test.ts
-```
+exactly one JSON document:
 
 ```json
 {
@@ -252,79 +265,15 @@ whodunit --json -- npm test auth.test.ts
 }
 ```
 
-Abridged: the full object also has the commits, timings and each hunk's id.
-Add `--verbose` to include the stdout and stderr of the baseline and current
-runs. Errors are JSON too (`{ "schema": 1, "error": "..." }`), and the exit
-codes are the same as without `--json`. `schema` goes up only when a field is
-removed or changes meaning.
+Abridged: the full object also has the commits, timings, `repeat`, `flaky`,
+`match` and each hunk's id. `--verbose` adds the test output. Errors are JSON
+too (`{ "schema": 1, "error": "..." }`), and exit codes do not change.
+`schema` goes up only when a field is removed or changes meaning.
 
-### As an MCP server, for agents
+</details>
 
-`whodunit mcp` serves the search over the
-[Model Context Protocol](https://modelcontextprotocol.io), so a coding agent
-can find the change that broke a test on its own, right after making it.
-
-With Claude Code:
-
-```bash
-claude mcp add whodunit -- npx -y whodunit mcp
-```
-
-Any other MCP client takes the same command, `npx -y whodunit mcp`, over
-stdio. If whodunit is installed globally, `whodunit mcp` works too.
-
-It exposes three tools:
-
-| Tool | Does |
-|---|---|
-| `whodunit_search` | The search. Returns the same object as `--json`. |
-| `whodunit_doctor` | The two precondition runs, without searching. |
-| `whodunit_hunks` | Lists the changes. Runs no tests. |
-
-Each takes `cwd`, the repository to work in, and the search and doctor take
-`command` as an argument list such as `["npm", "test", "auth.test.ts"]`. It is
-not run through a shell; use `["sh", "-c", "..."]` when you need one. The other
-options match the CLI flags.
-
-Searches report progress as they go. Cancelling a call stops its search at
-once: the running test is killed and the sandbox removed. Closing the
-connection does the same for every search still running. The server speaks both
-the current protocol (`2026-07-28`) and the earlier `initialize`-based versions
-back to `2024-11-05`, and has no dependencies beyond Node.
-
-### The sandbox and your dependencies
-
-A fresh worktree has no `node_modules`, so a test command would fail for the
-boring reason that its dependencies are missing. whodunit symlinks these in from
-your real project: `node_modules`, `.venv`, `venv`, `vendor/bundle`. Add more
-with `--link`.
-
-These links are shared with the real project, so a test suite that *writes* to
-one of them writes through. Keep `--link` to dependency caches.
-
-## Known limits
-
-**A brand-new file is one change.** There is no baseline to bisect against, so
-it is included or excluded whole. Same for a file rewritten so completely that
-no line survives. This is fundamental, not a setting.
-
-**Binary files and mode changes cannot be split.** Included or excluded whole.
-
-**It needs a fast, deterministic test.** The search runs your test command
-many times. Point it at the single failing test, not the whole suite.
-
-**A flaky test produces a confident wrong answer** unless you pass `--repeat`.
-Even then, a test flaky enough to agree with itself a few times in a row can
-slip through; a higher `--repeat` makes that less likely.
-
-**Windows is untested.** whodunit is developed on macOS, and the sandbox
-relies on symlinks, which Windows restricts by default.
-
-## How many test runs it takes
-
-One culprit is cheap: the count grows with the logarithm of the number of
-changes. Two that only fail together are not — ddmin is quadratic in the worst
-case, which is why there is a budget.
+<details>
+<summary><b>How many test runs a search takes</b></summary>
 
 | Changes | 1 culprit | 2 that only fail together |
 |---|---|---|
@@ -333,52 +282,80 @@ case, which is why there is a budget.
 | 100 | 12 (at most 15) | 45 (at most 54) |
 | 300 | 14 (at most 18) | 55 (at most 67) |
 
-Typical (median) test runs, including the two initial checks, with the worst
-case seen in brackets. Measured by running the search against simulated tests,
-across every culprit position and 300 random pairs.
+Median test runs including the two initial checks, with the worst case seen in
+brackets. Measured by running the search against simulated tests, across every
+culprit position and 300 random pairs. One culprit grows with the logarithm of
+the number of changes. Interacting culprits cost more, which is why
+`--max-probes` exists. When it runs out you still get a real failing set,
+reported as "narrowed to" rather than "found it".
 
-The default `--max-probes 60` covers all of these except the worst pairs among
-hundreds of changes. When the budget runs out you still get a real failing
-set, reported as "narrowed to" rather than "found it", because it was not
-proven minimal.
+</details>
 
-## A note on context lines
+<details>
+<summary><b>The sandbox and your dependencies</b></summary>
 
-Git merges hunks whose context windows overlap, so the `--context` setting
-decides how finely a change can be split. This matters more than it sounds.
+A fresh worktree has no `node_modules`, so whodunit symlinks these in from your
+project: `node_modules`, `.venv`, `venv`, `vendor/bundle`. Add more with
+`--link`. The links are shared with the real project, so keep them to
+dependency folders your tests only read.
 
-Thirty independent edits to thirty adjacent functions:
+</details>
 
-| Context | Hunks |
-|---|---|
-| `-U3` (Git's default) | 1 |
-| `-U1` (whodunit's default) | 30 |
+## Under the hood
 
-At Git's default the whole file is one unsplittable change. That is why
-whodunit defaults to `--context 1`.
+The interesting problems were not the algorithm. They were everything around
+it: never damaging the user's files, controlling processes the tool did not
+write, and staying correct when tests misbehave.
 
-Zero is the floor: it splits no more finely than 1, and `git apply` rejects
-zero-context patches unless given `--unidiff-zero`, which disables the
-placement check that stops a hunk landing in the wrong place.
+**Your files are never modified.** The working tree is captured as a real
+commit through a throwaway `GIT_INDEX_FILE`, so even your staged changes are
+untouched. Every candidate is built in a temporary `git worktree`, and always
+from the baseline, never by patching the previous candidate, so a failed patch
+can leave nothing behind.
+([snapshot.ts](src/git/snapshot.ts), [worktree.ts](src/git/worktree.ts),
+[apply.ts](src/diff/apply.ts))
 
-## Status
+**Correct patches or none.** `git apply` placement is left strict on purpose: a
+loosely placed hunk would test a state that never existed, and a wrong answer
+is worse than "can't tell". Diffs use one line of context instead of Git's
+three, which turns one unsplittable hunk into thirty independent ones on a
+typical refactor. The parser reads hunk bodies by their declared line counts,
+so diff-like text inside your code cannot confuse it.
+([parse.ts](src/diff/parse.ts), [diff.ts](src/git/diff.ts))
 
-| Phase | What | Status |
-|---|---|---|
-| 1 | Snapshot, sandbox, test runner, `doctor` | done |
-| 2 | Diff splitter, subset apply | done |
-| 3 | ddmin search | done |
-| 4 | Report and CLI: `--verbose`, `--json`, skip codes, clean interrupts | done |
-| 5 | MCP server, so agents can call it | done |
+**Processes are cleaned up, always.** Tests run in their own process group, so
+a timeout kills everything `npm test` started, not just `npm`. Ctrl+C, SIGTERM,
+an MCP client disconnecting and an MCP cancellation all run the same cleanup:
+kill the test, remove the sandbox, delete the snapshot ref. Cancellation is a
+standard `AbortSignal` passed from the MCP request down to the child process.
+([exec.ts](src/util/exec.ts), [interrupt.ts](src/util/interrupt.ts))
 
-## Requirements
+**A hand-written MCP server.** Under 300 lines of JSON-RPC over stdio, with no
+SDK, to keep the zero-dependency promise. It supports both protocol eras: the
+current per-request `2026-07-28` protocol with `server/discover`, and the
+older `initialize` handshake back to `2024-11-05`, so it works with old and new
+clients alike. ([server.ts](src/mcp/server.ts), [tools.ts](src/mcp/tools.ts))
 
-- Node 20+
-- Git 2.17+ (for `git worktree remove`)
-- A test command that exits 0 when things are fine
+**Tested like it matters.** 80 tests, including end-to-end runs of the real
+CLI, real Ctrl+C signals, and a client talking to the MCP server over stdio.
+Each bug fixed along the way got a test that was first shown to fail without
+the fix. CI runs on Ubuntu and macOS with Node 20, 22 and 24.
+([test/](test), [ci.yml](.github/workflows/ci.yml))
 
-No runtime dependencies.
+## Known limits
+
+- **A brand-new file is one change.** With no earlier version to compare
+  against, it is kept or dropped whole, and so is a file rewritten so
+  completely that no line survives.
+- **Binary files and permission changes cannot be split.**
+- **It needs a fast test.** Point it at one failing test, not the suite.
+- **Flaky tests** are caught by `--repeat`, but a test flaky enough to agree
+  with itself several times in a row can still slip through.
+- **Windows is untested.** The sandbox relies on symlinks, which Windows
+  restricts by default.
+
+Requires Node 20+ and Git 2.17+.
 
 ## License
 
-MIT
+MIT © Sithija Jayasinghe. See [CHANGELOG.md](CHANGELOG.md) for release notes.
