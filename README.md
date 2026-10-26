@@ -126,6 +126,9 @@ OPTIONS
                     nearby changes into one hunk. Default: 1
   --max-probes <n>  Give up after this many search runs, not counting the
                     two initial checks. Default: 60
+  --repeat <n>      Run the baseline, the current tree and the answer n
+                    times each. Catches a flaky test instead of trusting
+                    it. Default: 1
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. 125 always counts,
@@ -148,7 +151,7 @@ changes. To search the last commit as well, use `--since HEAD~1`.
 | Code | Meaning |
 |---|---|
 | 0 | Found the culprit (or `doctor`: ready to search) |
-| 1 | Nothing to search: the baseline already fails, the current tree passes, or a run could not be judged |
+| 1 | No trustworthy answer: the baseline already fails, the current tree passes, a run could not be judged, or `--repeat` found the test flaky |
 | 2 | Bad usage: an unknown option or an invalid value |
 | 130 / 143 | Interrupted by Ctrl+C / SIGTERM, after cleaning up |
 
@@ -168,6 +171,27 @@ whodunit -- sh -c 'npm run build || exit 125; npm test auth.test.ts'
 If your tool already uses a different exit code for build errors, pass it with
 `--skip-exit-code`. A timeout also counts as "cannot judge", and the timeout
 kills everything the test started, not just the top process.
+
+### Flaky tests
+
+whodunit trusts your test's exit code. A test that sometimes fails for no
+reason will send the search the wrong way, and it will still say "found it".
+
+`--repeat 3` guards against that. It runs the baseline and the current tree
+three times each before searching, and stops if they do not agree:
+
+```
+  CANNOT SEARCH  The test is flaky: the baseline gave pass, then fail on the
+  same code. A search would give a wrong answer, so fix or skip the flaky test
+  first.
+```
+
+After the search it re-runs the answer three times too: the culprits must fail
+every time, and with any one of them removed they must never fail. If that
+does not hold, the result is reported as not trustworthy and the exit code is 1.
+
+The search's own runs are not repeated, so the extra cost is a few runs, not
+three times as many.
 
 ### Seeing what the test printed
 
@@ -265,8 +289,9 @@ no line survives. This is fundamental, not a setting.
 **It needs a fast, deterministic test.** The search runs your test command
 many times. Point it at the single failing test, not the whole suite.
 
-**A flaky test produces a confident wrong answer.** whodunit trusts the exit
-code. If your test fails intermittently, the result is meaningless.
+**A flaky test produces a confident wrong answer** unless you pass `--repeat`.
+Even then, a test flaky enough to agree with itself a few times in a row can
+slip through; a higher `--repeat` makes that less likely.
 
 **Windows is untested.** whodunit is developed on macOS, and the sandbox
 relies on symlinks, which Windows restricts by default.

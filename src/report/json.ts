@@ -83,6 +83,10 @@ export function searchToJson(report: SearchReport, options: JsonOptions = {}) {
     minimal: report.result?.minimal ?? false,
     baseline: runToJson(report.baseline, options),
     current: runToJson(report.current, options),
+    /** How many times each check ran. */
+    repeat: report.repeat,
+    /** Set when re-running the same code gave a different outcome. */
+    flaky: report.flaky ?? null,
     testRuns: report.testRuns,
     elapsedMs: report.elapsedMs,
   };
@@ -102,6 +106,8 @@ export function preconditionsToJson(report: PreconditionReport, options: JsonOpt
     linked: report.linked,
     baseline: runToJson(report.baseline, options),
     current: runToJson(report.current, options),
+    repeat: report.repeat,
+    flaky: report.flaky ?? null,
   };
 }
 

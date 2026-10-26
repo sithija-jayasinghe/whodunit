@@ -5,6 +5,16 @@ All notable changes to whodunit are listed here. The format follows
 [Semantic Versioning](https://semver.org/). Until 1.0, a minor version may
 change behavior.
 
+## [Unreleased]
+
+### Added
+
+- `--repeat <n>` runs the baseline, the current tree and the final answer n
+  times each. A test that gives different results on the same code is
+  reported as flaky instead of producing a confident wrong answer. Available
+  as `repeat` on the MCP `whodunit_search` and `whodunit_doctor` tools, and
+  reported as `repeat` and `flaky` in `--json` output.
+
 ## [0.1.1] - 2026-10-26
 
 The first release on npm, and otherwise identical to 0.1.0.
@@ -43,5 +53,6 @@ The first release. Tagged in git, not published to npm (see 0.1.1).
   and remove the sandbox before exiting.
 - No runtime dependencies.
 
+[Unreleased]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/sithija-jayasinghe/whodunit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sithija-jayasinghe/whodunit/releases/tag/v0.1.0

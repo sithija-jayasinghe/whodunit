@@ -1,4 +1,4 @@
-import type { FilePatch, Hunk } from "../types.js";
+import type { FilePatch, Flakiness, Hunk } from "../types.js";
 
 const MAX_LINES_PER_HUNK = 12;
 
@@ -27,6 +27,10 @@ export interface CulpritReport {
   testRuns: number;
   minimal: boolean;
   elapsedMs: number;
+  /** How many times each check ran. Above 1, the answer was re-run too. */
+  repeat?: number;
+  /** Set when re-running the answer gave a different outcome. */
+  flaky?: Flakiness;
 }
 
 /**
@@ -38,7 +42,7 @@ export interface CulpritReport {
  * and it says so rather than overclaiming.
  */
 export function formatCulprit(report: CulpritReport): string {
-  const { culprits, patches, total, testRuns, minimal, elapsedMs } = report;
+  const { culprits, patches, total, testRuns, minimal, elapsedMs, repeat = 1, flaky } = report;
   const byFile = new Map(patches.map((patch) => [patch.file, patch]));
   const seconds = (elapsedMs / 1000).toFixed(1);
   const lines: string[] = [""];
@@ -50,9 +54,12 @@ export function formatCulprit(report: CulpritReport): string {
   }
 
   const count = culprits.length;
-  const headline = minimal
-    ? `Found it. ${count} change${count === 1 ? "" : "s"} out of ${total}:`
-    : `Narrowed to ${count} change${count === 1 ? "" : "s"} out of ${total}:`;
+  const changes = `${count} change${count === 1 ? "" : "s"} out of ${total}`;
+  const headline = flaky
+    ? `Narrowed to ${changes}, but this answer cannot be trusted:`
+    : minimal
+      ? `Found it. ${changes}:`
+      : `Narrowed to ${changes}:`;
   lines.push(`  ${headline}`, "");
 
   for (const hunk of culprits) {
@@ -67,7 +74,12 @@ export function formatCulprit(report: CulpritReport): string {
     lines.push("");
   }
 
-  if (minimal) {
+  if (flaky) {
+    lines.push(
+      `  Re-running this answer gave ${flaky.outcomes.join(", then ")} on the same code.`,
+      "  The test is flaky, so do not trust this result.",
+    );
+  } else if (minimal) {
     lines.push(
       count === 1
         ? "  Proven: the test passes without this change and fails with it."
@@ -78,6 +90,9 @@ export function formatCulprit(report: CulpritReport): string {
     lines.push("  Re-run with a higher --max-probes to narrow it further.");
   }
 
+  if (!flaky && repeat > 1) {
+    lines.push(`  Confirmed: the answer gave the same result in ${repeat} re-runs.`);
+  }
   lines.push(`  ${testRuns} test run${testRuns === 1 ? "" : "s"} in ${seconds}s.`, "");
   return lines.join("\n");
 }

@@ -141,6 +141,15 @@ async function repoArgument(args: Arguments): Promise<string> {
   return repoRoot(resolve(requiredString(args, "cwd")));
 }
 
+const repeat = {
+  type: "integer",
+  minimum: 1,
+  description:
+    "Run the baseline, the current tree and the answer this many times each, to catch a " +
+    "flaky test. A non-null flaky field in the result means the test is not deterministic " +
+    "and the answer must not be trusted. Default: 1. Use 2 or 3 if the test might be flaky.",
+};
+
 const maxProbes = {
   type: "integer",
   minimum: 1,
@@ -149,14 +158,14 @@ const maxProbes = {
 
 const searchSchema = {
   type: "object",
-  properties: { cwd, command, since, timeoutMs, maxProbes, skipExitCodes, context, verbose },
+  properties: { cwd, command, since, timeoutMs, maxProbes, repeat, skipExitCodes, context, verbose },
   required: ["cwd", "command"],
   additionalProperties: false,
 };
 
 const doctorSchema = {
   type: "object",
-  properties: { cwd, command, since, timeoutMs, skipExitCodes, verbose },
+  properties: { cwd, command, since, timeoutMs, repeat, skipExitCodes, verbose },
   required: ["cwd", "command"],
   additionalProperties: false,
 };
@@ -178,7 +187,8 @@ export const TOOLS: readonly Tool[] = [
       "Use it when a test went red after a set of edits and the cause is not obvious. " +
       "Runs in a throwaway git worktree; the real working tree is never modified. " +
       "The result's culprits are the proven cause; minimal=false means the probe budget " +
-      "ran out first. If searchable is false, reason says why (for example the test " +
+      "ran out first, and a non-null flaky means the test is not deterministic, so the " +
+      "answer is not trustworthy. If searchable is false, reason says why (for example the test " +
       "already failed at the baseline).",
     inputSchema: searchSchema,
     async run(args, context) {
@@ -189,6 +199,7 @@ export const TOOLS: readonly Tool[] = [
         testCommand: commandArgument(args),
         timeoutMs: optionalInteger(args, "timeoutMs", 1),
         maxProbes: optionalInteger(args, "maxProbes", 1),
+        repeat: optionalInteger(args, "repeat", 1),
         skipExitCodes: skipCodesArgument(args),
         contextLines: optionalInteger(args, "context", 0),
       };
@@ -222,6 +233,7 @@ export const TOOLS: readonly Tool[] = [
         baselineRef: optionalString(args, "since") ?? "HEAD",
         testCommand: commandArgument(args),
         timeoutMs: optionalInteger(args, "timeoutMs", 1),
+        repeat: optionalInteger(args, "repeat", 1),
         skipExitCodes: skipCodesArgument(args),
         signal: context.signal,
         onStep: (message) => context.progress(message),

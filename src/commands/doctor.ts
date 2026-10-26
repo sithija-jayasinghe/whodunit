@@ -1,8 +1,8 @@
 import { createSandbox } from "../git/worktree.js";
 import { snapshotWorkingTree } from "../git/snapshot.js";
 import { isDirty, resolveRef } from "../git/repo.js";
-import { explainUnresolved, runTest } from "../runner/test.js";
-import type { TestResult } from "../types.js";
+import { disagree, explainFlaky, explainUnresolved, runRepeated, runTest } from "../runner/test.js";
+import type { Flakiness, TestResult } from "../types.js";
 
 export interface PreconditionReport {
   repo: string;
@@ -17,6 +17,10 @@ export interface PreconditionReport {
    *  situation in which searching for a culprit is meaningful. */
   searchable: boolean;
   reason: string;
+  /** How many times each side was run. */
+  repeat: number;
+  /** Set when re-running the same side gave a different outcome. */
+  flaky?: Flakiness;
 }
 
 /**
@@ -37,10 +41,13 @@ export async function checkPreconditions(options: {
   link?: readonly string[];
   /** Stop: the running test is killed, the sandbox removed, and the call rejects. */
   signal?: AbortSignal;
+  /** Run each side this many times, to catch a flaky test. Default: 1. */
+  repeat?: number;
   onStep?: (message: string) => void;
 }): Promise<PreconditionReport> {
   const { repo, baselineRef, testCommand, timeoutMs, skipExitCodes, link, signal, onStep = () => {} } =
     options;
+  const repeat = options.repeat ?? 1;
 
   const baselineCommit = await resolveRef(repo, baselineRef);
   const dirty = await isDirty(repo);
@@ -48,19 +55,16 @@ export async function checkPreconditions(options: {
   onStep(`Snapshotting working tree`);
   const snapshot = await snapshotWorkingTree(repo, "whodunit: working tree snapshot");
 
-  let baseline: TestResult;
-  let current: TestResult;
+  let baselines: TestResult[];
+  let currents: TestResult[];
   let linked: string[];
   try {
     onStep(`Testing baseline (${baselineRef} ${baselineCommit.slice(0, 7)})`);
     const baselineSandbox = await createSandbox(repo, baselineCommit, { link });
     try {
-      baseline = await runTest(testCommand, {
-        cwd: baselineSandbox.path,
-        timeoutMs,
-        skipExitCodes,
-        signal,
-      });
+      baselines = await runRepeated(repeat, () =>
+        runTest(testCommand, { cwd: baselineSandbox.path, timeoutMs, skipExitCodes, signal }),
+      );
     } finally {
       await baselineSandbox.dispose();
     }
@@ -70,12 +74,9 @@ export async function checkPreconditions(options: {
     const currentSandbox = await createSandbox(repo, snapshot.commit, { link });
     try {
       linked = currentSandbox.linked;
-      current = await runTest(testCommand, {
-        cwd: currentSandbox.path,
-        timeoutMs,
-        skipExitCodes,
-        signal,
-      });
+      currents = await runRepeated(repeat, () =>
+        runTest(testCommand, { cwd: currentSandbox.path, timeoutMs, skipExitCodes, signal }),
+      );
     } finally {
       await currentSandbox.dispose();
     }
@@ -83,9 +84,19 @@ export async function checkPreconditions(options: {
     await snapshot.release();
   }
 
+  const baseline = baselines[baselines.length - 1]!;
+  const current = currents[currents.length - 1]!;
+
   let reason: string;
   let searchable = false;
-  if (baseline.outcome !== "pass") {
+  let flaky: Flakiness | undefined;
+  if (disagree(baselines)) {
+    reason = explainFlaky("baseline", baselines);
+    flaky = { stage: "baseline", outcomes: baselines.map((result) => result.outcome) };
+  } else if (disagree(currents)) {
+    reason = explainFlaky("current tree", currents);
+    flaky = { stage: "current", outcomes: currents.map((result) => result.outcome) };
+  } else if (baseline.outcome !== "pass") {
     reason =
       baseline.outcome === "unresolved"
         ? explainUnresolved("baseline", baseline)
@@ -110,5 +121,7 @@ export async function checkPreconditions(options: {
     current,
     searchable,
     reason,
+    repeat,
+    ...(flaky ? { flaky } : {}),
   };
 }

@@ -283,3 +283,70 @@ test("an aborted search stops, rejects, and leaves no sandbox", async () => {
   const worktrees = await execOrThrow("git", ["worktree", "list"], { cwd: repo });
   assert.equal(worktrees.stdout.trim().split("\n").length, 1, "a sandbox was left behind");
 });
+
+/**
+ * A test command that counts its own runs in a file outside the sandbox, so a
+ * test can make it misbehave on chosen runs. `rule` is shell that sees the run
+ * number as $n and may exit early; otherwise the real test runs.
+ */
+function countingTest(rule: string): string[] {
+  const counter = join(root, `counter-${Math.random().toString(36).slice(2)}`);
+  return ["sh", "-c", `n=$(cat '${counter}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '${counter}'; ${rule} exec node test.js`];
+}
+
+test("--repeat catches a test that flakes at the baseline instead of searching", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+  // The second run of the unchanged baseline fails for no reason.
+  const testCommand = countingTest("[ $n -eq 2 ] && exit 1;");
+
+  const report = await search({ repo, baselineRef: "HEAD", testCommand, repeat: 3 });
+
+  assert.equal(report.searchable, false);
+  assert.match(report.reason, /flaky/);
+  assert.equal(report.flaky?.stage, "baseline");
+  assert.deepEqual(report.flaky?.outcomes, ["pass", "fail"]);
+  assert.equal(report.testRuns, 2, "it should stop at the first disagreement");
+});
+
+test("--repeat confirms a stable answer", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+
+  const report = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND, repeat: 3 });
+
+  assert.equal(report.searchable, true, report.reason);
+  assert.equal(report.flaky, undefined);
+  assert.equal(report.repeat, 3);
+  assert.deepEqual(report.result?.culprits.map((hunk) => hunk.file), ["src/mod6.js"]);
+});
+
+test("--repeat rejects an answer that does not hold up when re-run", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+  // Learn how many runs a stable search of this fixture takes, then make the
+  // test start passing right after that point, as a flaky test might.
+  const stable = await search({ repo, baselineRef: "HEAD", testCommand: TEST_COMMAND });
+  const searchRuns = stable.testRuns - 2;
+  const lastHonestRun = 3 + 3 + searchRuns;
+  const testCommand = countingTest(`[ $n -gt ${lastHonestRun} ] && exit 0;`);
+
+  const report = await search({ repo, baselineRef: "HEAD", testCommand, repeat: 3 });
+
+  assert.equal(report.flaky?.stage, "confirm");
+  assert.match(report.reason, /did not hold up/);
+  assert.ok(report.result, "the unconfirmed set is still reported");
+});
+
+test("doctor --repeat reports a flaky current tree", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+  // Runs 1-3 are the baseline. Run 5 is the second current run.
+  const testCommand = countingTest("[ $n -eq 5 ] && exit 0;");
+
+  const report = await checkPreconditions({ repo, baselineRef: "HEAD", testCommand, repeat: 3 });
+
+  assert.equal(report.searchable, false);
+  assert.equal(report.flaky?.stage, "current");
+  assert.deepEqual(report.flaky?.outcomes, ["fail", "pass"]);
+});

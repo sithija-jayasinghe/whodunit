@@ -76,3 +76,35 @@ export function explainUnresolved(which: string, result: TestResult): string {
     ? `The ${which} test timed out. Narrow the test command or raise --timeout.`
     : `The ${which} test exited ${result.exitCode}, which means skip, so it cannot be judged.`;
 }
+
+/**
+ * Run a test up to `times` times on the same code, stopping at the first
+ * outcome that differs from the first. A deterministic test gives `times`
+ * equal results; anything else is proof that it is flaky.
+ */
+export async function runRepeated(
+  times: number,
+  once: () => Promise<TestResult>,
+): Promise<TestResult[]> {
+  const results: TestResult[] = [];
+  for (let i = 0; i < times; i++) {
+    const result = await once();
+    results.push(result);
+    if (result.outcome !== results[0]!.outcome) break;
+  }
+  return results;
+}
+
+/** True when repeated runs of the same code did not all agree. */
+export function disagree(results: readonly TestResult[]): boolean {
+  return results.some((result) => result.outcome !== results[0]?.outcome);
+}
+
+/** Explain flaky baseline or current runs, which leave nothing to search. */
+export function explainFlaky(which: string, results: readonly TestResult[]): string {
+  const outcomes = results.map((result) => result.outcome).join(", then ");
+  return (
+    `The test is flaky: the ${which} gave ${outcomes} on the same code. ` +
+    "A search would give a wrong answer, so fix or skip the flaky test first."
+  );
+}

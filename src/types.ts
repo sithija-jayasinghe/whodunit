@@ -56,3 +56,14 @@ export interface TestResult {
   stderr: string;
   timedOut: boolean;
 }
+
+/**
+ * Evidence that the test is flaky: the same code gave different outcomes when
+ * run again. Any answer built on such a test could be wrong.
+ */
+export interface Flakiness {
+  /** Where it showed: re-running the baseline, the current tree, or the answer. */
+  stage: "baseline" | "current" | "confirm";
+  /** The outcomes of the repeated runs, ending at the first disagreement. */
+  outcomes: Outcome[];
+}

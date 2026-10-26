@@ -1,9 +1,9 @@
 import { createSandbox } from "../git/worktree.js";
 import { applySubset } from "../diff/apply.js";
-import { explainUnresolved, runTest } from "../runner/test.js";
+import { disagree, explainFlaky, explainUnresolved, runRepeated, runTest } from "../runner/test.js";
 import { ddmin, type Probe, type ProbeEvent, type SearchResult } from "../search/ddmin.js";
 import { listHunks } from "./hunks.js";
-import type { FilePatch, Hunk, TestResult } from "../types.js";
+import type { FilePatch, Flakiness, Hunk, Outcome, TestResult } from "../types.js";
 
 export const DEFAULT_MAX_PROBES = 60;
 
@@ -16,6 +16,11 @@ export interface SearchOptions {
   /** Exit codes that mean "cannot judge this state". Default: 125. */
   skipExitCodes?: readonly number[];
   maxProbes?: number;
+  /**
+   * Run the baseline, the current tree and the final answer this many times
+   * each, to catch a flaky test before it produces a wrong answer. Default: 1.
+   */
+  repeat?: number;
   link?: readonly string[];
   /**
    * Stop the search: the running test is killed, the sandbox removed, and the
@@ -31,8 +36,9 @@ export interface SearchOptions {
 
 export type RunEvent =
   | {
-      /** Which run: the two precondition checks, or a search probe. */
-      kind: "baseline" | "current" | "probe";
+      /** Which run: a precondition check, a search probe, or a re-run
+       *  confirming the answer. */
+      kind: "baseline" | "current" | "probe" | "confirm";
       subset: readonly Hunk[];
       result: TestResult;
     }
@@ -56,6 +62,14 @@ export interface SearchReport {
   result?: SearchResult;
   searchable: boolean;
   reason: string;
+  /** How many times each check was run. */
+  repeat: number;
+  /**
+   * Set when re-running the same code gave a different outcome. At the
+   * baseline or current tree it stops the search; at "confirm" the result is
+   * kept but must not be trusted.
+   */
+  flaky?: Flakiness;
   /** Every time the test command ran, preconditions included. */
   testRuns: number;
   elapsedMs: number;
@@ -74,6 +88,7 @@ export interface SearchReport {
  */
 export async function search(options: SearchOptions): Promise<SearchReport> {
   const { repo, baselineRef, testCommand, signal, onStep = () => {} } = options;
+  const repeat = options.repeat ?? 1;
   const startedAt = Date.now();
 
   onStep("Snapshotting working tree");
@@ -86,12 +101,13 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
 
   let testRuns = 0;
   const finish = (
-    outcome: Omit<SearchReport, keyof typeof listing | "testRuns" | "elapsedMs">,
+    outcome: Omit<SearchReport, keyof typeof listing | "repeat" | "testRuns" | "elapsedMs">,
   ): SearchReport => ({
     baselineCommit,
     snapshotCommit,
     patches,
     hunks,
+    repeat,
     ...outcome,
     testRuns,
     elapsedMs: Date.now() - startedAt,
@@ -108,7 +124,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
   const sandbox = await createSandbox(repo, baselineCommit, { link: options.link });
   const preserve = sandbox.linked;
 
-  const run = async (kind: "baseline" | "current" | "probe", subset: readonly Hunk[]) => {
+  const run = async (kind: "baseline" | "current" | "probe" | "confirm", subset: readonly Hunk[]) => {
     testRuns++;
     const result = await runTest(testCommand, {
       cwd: sandbox.path,
@@ -132,11 +148,55 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
     return (await run("probe", subset)).outcome;
   };
 
+  /**
+   * Re-run the answer. The culprits must fail every time, and with any one
+   * of them removed they must never fail. Returns the evidence if either
+   * does not hold.
+   */
+  const confirm = async (culprits: readonly Hunk[], minimal: boolean): Promise<Flakiness | undefined> => {
+    const check = async (subset: readonly Hunk[], holds: (outcome: Outcome) => boolean) => {
+      const outcomes: Outcome[] = [];
+      for (let i = 0; i < repeat; i++) {
+        const applied = await applySubset(sandbox.path, patches, subset, preserve);
+        const outcome = applied.applied ? (await run("confirm", subset)).outcome : "unresolved";
+        outcomes.push(outcome);
+        if (!holds(outcome)) return { stage: "confirm" as const, outcomes };
+      }
+      return undefined;
+    };
+
+    // The full set and the empty set were already re-run as the current tree
+    // and the baseline, so they need no second confirmation.
+    if (culprits.length < hunks.length) {
+      const failing = await check(culprits, (outcome) => outcome === "fail");
+      if (failing) return failing;
+    }
+    // A budget-limited result was never claimed minimal, so its reductions
+    // may legitimately fail.
+    if (!minimal) return undefined;
+    for (const hunk of culprits) {
+      const reduced = culprits.filter((other) => other !== hunk);
+      if (reduced.length === 0) continue;
+      const failed = await check(reduced, (outcome) => outcome !== "fail");
+      if (failed) return failed;
+    }
+    return undefined;
+  };
+
   try {
     onStep(`Testing baseline (${hunks.length} changes to search)`);
     await applySubset(sandbox.path, patches, [], preserve);
-    const baseline = await run("baseline", []);
+    const baselines = await runRepeated(repeat, () => run("baseline", []));
+    const baseline = baselines[baselines.length - 1]!;
 
+    if (disagree(baselines)) {
+      return finish({
+        baseline,
+        searchable: false,
+        reason: explainFlaky("baseline", baselines),
+        flaky: { stage: "baseline", outcomes: baselines.map((result) => result.outcome) },
+      });
+    }
     if (baseline.outcome !== "pass") {
       return finish({
         baseline,
@@ -157,8 +217,18 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         reason: `The full change set would not apply to the baseline: ${fullApplied.stderr.trim()}`,
       });
     }
-    const current = await run("current", hunks);
+    const currents = await runRepeated(repeat, () => run("current", hunks));
+    const current = currents[currents.length - 1]!;
 
+    if (disagree(currents)) {
+      return finish({
+        baseline,
+        current,
+        searchable: false,
+        reason: explainFlaky("current tree", currents),
+        flaky: { stage: "current", outcomes: currents.map((result) => result.outcome) },
+      });
+    }
     if (current.outcome !== "fail") {
       return finish({
         baseline,
@@ -183,14 +253,24 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
     // ddmin can finish on cached answers alone after an abort; still honor it.
     signal?.throwIfAborted();
 
+    let flaky: Flakiness | undefined;
+    if (repeat > 1 && result.culprits.length > 0) {
+      onStep(`Confirming the answer (${repeat} runs each)`);
+      flaky = await confirm(result.culprits, result.minimal);
+    }
+
     return finish({
       baseline,
       current,
       result,
       searchable: true,
-      reason: result.minimal
-        ? "Search completed."
-        : "Probe budget reached before the set was proven minimal.",
+      ...(flaky ? { flaky } : {}),
+      reason: flaky
+        ? `The answer did not hold up when re-run: it gave ${flaky.outcomes.join(", then ")}. ` +
+          "The test is flaky, so do not trust this result."
+        : result.minimal
+          ? "Search completed."
+          : "Probe budget reached before the set was proven minimal.",
     });
   } finally {
     await sandbox.dispose();

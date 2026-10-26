@@ -42,6 +42,9 @@ OPTIONS
                     nearby changes into one hunk. Default: 1
   --max-probes <n>  Give up after this many search runs, not counting the
                     two initial checks. Default: ${DEFAULT_MAX_PROBES}
+  --repeat <n>      Run the baseline, the current tree and the answer n
+                    times each. Catches a flaky test instead of trusting
+                    it. Default: 1
   --skip-exit-code <n>
                     Treat this exit code as "cannot test this state", e.g.
                     when the build fails. Repeatable. ${SKIP_EXIT_CODE} always counts,
@@ -109,6 +112,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       link: { type: "string", multiple: true, default: [] },
       context: { type: "string" },
       "max-probes": { type: "string" },
+      repeat: { type: "string" },
       "skip-exit-code": { type: "string", multiple: true, default: [] },
       verbose: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
@@ -175,6 +179,11 @@ async function main(argv: string[], json: boolean): Promise<number> {
   }
   const skipExitCodes = [SKIP_EXIT_CODE, ...extraSkipCodes];
 
+  const repeat = values.repeat === undefined ? undefined : Number(values.repeat);
+  if (repeat !== undefined && (!Number.isInteger(repeat) || repeat < 1)) {
+    return fail("--repeat must be a whole number of at least 1.");
+  }
+
   if (command === "doctor") {
     const report = await checkPreconditions({
       repo,
@@ -182,6 +191,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       testCommand,
       timeoutMs,
       skipExitCodes,
+      repeat,
       link: values.link,
       onStep: (message) => {
         if (!json) process.stdout.write(`  ${message}...\n`);
@@ -237,6 +247,7 @@ async function main(argv: string[], json: boolean): Promise<number> {
       timeoutMs,
       skipExitCodes,
       maxProbes,
+      repeat,
       link: values.link,
       onStep: (message) => {
         if (!json) process.stdout.write(`  ${message}...\n`);
@@ -267,9 +278,12 @@ async function main(argv: string[], json: boolean): Promise<number> {
       },
     });
 
+    // An answer that did not survive being re-run is not a finding.
+    const found = report.searchable && report.result !== undefined && !report.flaky;
+
     if (json) {
       printJson(searchToJson(report, { verbose: values.verbose }));
-      return report.searchable && report.result ? 0 : 1;
+      return found ? 0 : 1;
     }
 
     if (!report.searchable || !report.result) {
@@ -285,9 +299,11 @@ async function main(argv: string[], json: boolean): Promise<number> {
         testRuns: report.testRuns,
         minimal: report.result.minimal,
         elapsedMs: report.elapsedMs,
+        repeat: report.repeat,
+        flaky: report.flaky,
       }),
     );
-    return 0;
+    return found ? 0 : 1;
   }
 
   return fail(`Unknown command: ${command}`);
