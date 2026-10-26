@@ -230,8 +230,9 @@ Each takes `cwd`, the repository to work in, and the search and doctor take
 not run through a shell; use `["sh", "-c", "..."]` when you need one. The other
 options match the CLI flags.
 
-Searches report progress as they go. If the client closes the connection, any
-search still running is stopped and its sandbox removed. The server speaks both
+Searches report progress as they go. Cancelling a call stops its search at
+once: the running test is killed and the sandbox removed. Closing the
+connection does the same for every search still running. The server speaks both
 the current protocol (`2026-07-28`) and the earlier `initialize`-based versions
 back to `2024-11-05`, and has no dependencies beyond Node.
 

@@ -35,9 +35,11 @@ export async function checkPreconditions(options: {
   /** Exit codes that mean "cannot judge this state". Default: 125. */
   skipExitCodes?: readonly number[];
   link?: readonly string[];
+  /** Stop: the running test is killed, the sandbox removed, and the call rejects. */
+  signal?: AbortSignal;
   onStep?: (message: string) => void;
 }): Promise<PreconditionReport> {
-  const { repo, baselineRef, testCommand, timeoutMs, skipExitCodes, link, onStep = () => {} } =
+  const { repo, baselineRef, testCommand, timeoutMs, skipExitCodes, link, signal, onStep = () => {} } =
     options;
 
   const baselineCommit = await resolveRef(repo, baselineRef);
@@ -57,11 +59,13 @@ export async function checkPreconditions(options: {
         cwd: baselineSandbox.path,
         timeoutMs,
         skipExitCodes,
+        signal,
       });
     } finally {
       await baselineSandbox.dispose();
     }
 
+    signal?.throwIfAborted();
     onStep(`Testing current tree (${snapshot.commit.slice(0, 7)})`);
     const currentSandbox = await createSandbox(repo, snapshot.commit, { link });
     try {
@@ -70,6 +74,7 @@ export async function checkPreconditions(options: {
         cwd: currentSandbox.path,
         timeoutMs,
         skipExitCodes,
+        signal,
       });
     } finally {
       await currentSandbox.dispose();

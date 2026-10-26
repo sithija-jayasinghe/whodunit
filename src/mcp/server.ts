@@ -46,6 +46,12 @@ class RpcError extends Error {
 type Id = string | number;
 type Params = Record<string, unknown>;
 
+interface RequestState {
+  /** Once set, nothing more is sent for this request. */
+  cancelled: boolean;
+  controller: AbortController;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -68,15 +74,15 @@ export function serveMcp(options: McpServerOptions): Promise<void> {
   const { input, output, version } = options;
   const serverInfo = { name: "whodunit", version };
 
-  /** Requests still running, so a cancellation can silence them. */
-  const inFlight = new Map<Id, { cancelled: boolean }>();
+  /** Requests still running, so a cancellation can find and stop them. */
+  const inFlight = new Map<Id, RequestState>();
 
   // stdout carries nothing but protocol messages. JSON.stringify escapes any
   // newline inside a string, so each message is exactly one line.
   const send = (message: object) => output.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 
   const handleRequest = async (id: Id, method: string, params: Params) => {
-    const state = { cancelled: false };
+    const state: RequestState = { cancelled: false, controller: new AbortController() };
     inFlight.set(id, state);
     try {
       const result = await dispatch(method, params, state);
@@ -97,7 +103,7 @@ export function serveMcp(options: McpServerOptions): Promise<void> {
     }
   };
 
-  const dispatch = async (method: string, params: Params, state: { cancelled: boolean }) => {
+  const dispatch = async (method: string, params: Params, state: RequestState) => {
     if (method === "initialize") return initialize(params);
 
     const meta = isObject(params._meta) ? params._meta : {};
@@ -161,7 +167,7 @@ export function serveMcp(options: McpServerOptions): Promise<void> {
     }
   };
 
-  const callTool = async (params: Params, meta: Record<string, unknown>, state: { cancelled: boolean }) => {
+  const callTool = async (params: Params, meta: Record<string, unknown>, state: RequestState) => {
     const tool = TOOLS.find((candidate) => candidate.name === params.name);
     if (!tool) throw new RpcError(INVALID_PARAMS, `Unknown tool: ${String(params.name)}`);
     if (params.arguments !== undefined && !isObject(params.arguments)) {
@@ -172,6 +178,7 @@ export function serveMcp(options: McpServerOptions): Promise<void> {
     let progress = 0;
     let done = false;
     const context = {
+      signal: state.controller.signal,
       progress(message: string) {
         // Only while the request is live, and only if the client asked.
         if (done || state.cancelled || (typeof token !== "string" && typeof token !== "number")) return;
@@ -233,8 +240,13 @@ export function serveMcp(options: McpServerOptions): Promise<void> {
       // A notification: no reply, ever.
       if (id === undefined) {
         if (method === "notifications/cancelled") {
+          // Silence the request and stop its work: the abort kills the
+          // running test and removes the sandbox. No response is sent.
           const target = inFlight.get(params.requestId as Id);
-          if (target) target.cancelled = true;
+          if (target) {
+            target.cancelled = true;
+            target.controller.abort();
+          }
         }
         return;
       }

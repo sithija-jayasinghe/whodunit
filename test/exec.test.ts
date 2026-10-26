@@ -81,3 +81,40 @@ test("a command that finishes in time is not marked as timed out", async () => {
   assert.equal(result.exitCode, 0);
   assert.equal(result.stdout.trim(), "ok");
 });
+
+test("an abort kills the whole tree and rejects instead of returning", posixOnly, async () => {
+  const controller = new AbortController();
+  const dir = await mkdtemp(join(tmpdir(), "whodunit-exec-"));
+  const pidFile = join(dir, "pid");
+  try {
+    const running = exec("sh", ["-c", 'sleep 30 >/dev/null 2>&1 & echo $! > "$PID_FILE"; wait'], {
+      env: { PID_FILE: pidFile },
+      signal: controller.signal,
+    });
+    const deadline = Date.now() + 5000;
+    while (!(await readFile(pidFile, "utf8").catch(() => "")).trim()) {
+      if (Date.now() > deadline) throw new Error("sh never recorded a pid");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const grandchild = Number((await readFile(pidFile, "utf8")).trim());
+
+    const startedAt = Date.now();
+    controller.abort();
+    await assert.rejects(running, { name: "AbortError" });
+
+    assert.ok(Date.now() - startedAt < 5000, "the abort did not take effect promptly");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(isAlive(grandchild), false, `grandchild ${grandchild} survived the abort`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an already-aborted signal never starts the command", async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  await assert.rejects(exec(process.execPath, ["-e", ""], { signal: controller.signal }), {
+    name: "AbortError",
+  });
+});

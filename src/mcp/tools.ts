@@ -11,6 +11,8 @@ import { SKIP_EXIT_CODE } from "../runner/test.js";
 export interface ToolContext {
   /** Report a step of a long run. Dropped if the client did not ask. */
   progress(message: string): void;
+  /** Aborts when the client cancels the request. */
+  signal: AbortSignal;
 }
 
 export interface Tool {
@@ -192,6 +194,7 @@ export const TOOLS: readonly Tool[] = [
       };
       const report = await search({
         ...options,
+        signal: context.signal,
         onStep: (message) => context.progress(message),
         onProbe: (event) => {
           if (event.cached) return;
@@ -220,6 +223,7 @@ export const TOOLS: readonly Tool[] = [
         testCommand: commandArgument(args),
         timeoutMs: optionalInteger(args, "timeoutMs", 1),
         skipExitCodes: skipCodesArgument(args),
+        signal: context.signal,
         onStep: (message) => context.progress(message),
       });
       return preconditionsToJson(report, { verbose: optionalBoolean(args, "verbose") });

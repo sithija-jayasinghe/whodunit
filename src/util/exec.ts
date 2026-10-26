@@ -9,6 +9,11 @@ export interface ExecOptions {
   timeoutMs?: number;
   /** Feed this to stdin, then close it. */
   input?: string;
+  /**
+   * Kill the process, and everything it started, when this aborts. The call
+   * then rejects with the signal's reason instead of reporting a result.
+   */
+  signal?: AbortSignal;
 }
 
 export interface ExecResult {
@@ -21,7 +26,7 @@ export interface ExecResult {
 /**
  * Run a command and resolve with its result. Never rejects on a non-zero exit
  * code -- callers decide what a failure means. Rejects only if the process
- * could not be spawned at all.
+ * could not be spawned at all, or `signal` aborted it.
  */
 export function exec(
   command: string,
@@ -29,9 +34,16 @@ export function exec(
   options: ExecOptions = {},
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    // With a timeout, lead a new process group so the timeout can kill
-    // everything the command started and not just the command. See killTree.
-    const detached = options.timeoutMs !== undefined && process.platform !== "win32";
+    const { signal } = options;
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+
+    // When the command may be killed early, lead a new process group so the
+    // kill reaches everything it started and not just the command. See killTree.
+    const detached =
+      (options.timeoutMs !== undefined || signal !== undefined) && process.platform !== "win32";
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env ? { ...process.env, ...options.env } : process.env,
@@ -70,6 +82,15 @@ export function exec(
             child.stderr.destroy();
           }, options.timeoutMs);
 
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      killTree(child);
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -81,15 +102,23 @@ export function exec(
 
     child.on("error", (error) => {
       if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       reject(error);
     });
 
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       // Killed because whodunit is exiting. Its exit code says nothing about
       // the test, so never report it: the caller would take it as a failure
       // and carry on while the cleanup runs.
       if (interrupted) return;
+      // Likewise a run killed by an abort: the caller asked to stop, not for
+      // the exit code of a process it had killed.
+      if (aborted) {
+        reject(signal?.reason);
+        return;
+      }
       resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
     });
 

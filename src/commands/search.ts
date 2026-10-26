@@ -17,6 +17,11 @@ export interface SearchOptions {
   skipExitCodes?: readonly number[];
   maxProbes?: number;
   link?: readonly string[];
+  /**
+   * Stop the search: the running test is killed, the sandbox removed, and the
+   * call rejects with the signal's reason.
+   */
+  signal?: AbortSignal;
   onStep?: (message: string) => void;
   onProbe?: (event: ProbeEvent) => void;
   /** Called after every test run, with its full output, and for every subset
@@ -68,7 +73,7 @@ export interface SearchReport {
  * never repeated.
  */
 export async function search(options: SearchOptions): Promise<SearchReport> {
-  const { repo, baselineRef, testCommand, onStep = () => {} } = options;
+  const { repo, baselineRef, testCommand, signal, onStep = () => {} } = options;
   const startedAt = Date.now();
 
   onStep("Snapshotting working tree");
@@ -99,6 +104,7 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
     });
   }
 
+  signal?.throwIfAborted();
   const sandbox = await createSandbox(repo, baselineCommit, { link: options.link });
   const preserve = sandbox.linked;
 
@@ -108,12 +114,15 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
       cwd: sandbox.path,
       timeoutMs: options.timeoutMs,
       skipExitCodes: options.skipExitCodes,
+      signal,
     });
     options.onRun?.({ kind, subset, result });
     return result;
   };
 
   const probe: Probe = async (subset) => {
+    // Throwing ends ddmin; the finally below still removes the sandbox.
+    signal?.throwIfAborted();
     const applied = await applySubset(sandbox.path, patches, subset, preserve);
     // A rejected patch is not a reachable state, so we cannot judge it.
     if (!applied.applied) {
@@ -171,6 +180,8 @@ export async function search(options: SearchOptions): Promise<SearchReport> {
         { subset: hunks, outcome: current.outcome },
       ],
     });
+    // ddmin can finish on cached answers alone after an abort; still honor it.
+    signal?.throwIfAborted();
 
     return finish({
       baseline,

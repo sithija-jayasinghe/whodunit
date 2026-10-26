@@ -8,6 +8,8 @@ export interface RunTestOptions {
   /** Exit codes that mean "cannot judge this state". Default: 125. */
   skipExitCodes?: readonly number[];
   env?: NodeJS.ProcessEnv;
+  /** Stop the run. The call then rejects instead of returning a result. */
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_TEST_TIMEOUT_MS = 10 * 60 * 1000;
@@ -46,6 +48,7 @@ export async function runTest(
     cwd: options.cwd,
     env: options.env,
     timeoutMs: options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS,
+    signal: options.signal,
   });
   const durationMs = Date.now() - startedAt;
 

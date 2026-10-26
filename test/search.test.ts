@@ -258,3 +258,28 @@ test("every test run is reported with its output, and all of them are counted", 
   // The two precondition runs happened too, so they belong in the count.
   assert.equal(report.testRuns, report.result.probes + 2);
 });
+
+test("an aborted search stops, rejects, and leaves no sandbox", async () => {
+  await commitGreen();
+  await writeProject(6, true);
+  const controller = new AbortController();
+  let probesAfterAbort = 0;
+
+  await assert.rejects(
+    search({
+      repo,
+      baselineRef: "HEAD",
+      testCommand: TEST_COMMAND,
+      signal: controller.signal,
+      onProbe: (event) => {
+        if (controller.signal.aborted && !event.cached) probesAfterAbort++;
+        controller.abort();
+      },
+    }),
+    { name: "AbortError" },
+  );
+
+  assert.equal(probesAfterAbort, 0, "the search kept running after the abort");
+  const worktrees = await execOrThrow("git", ["worktree", "list"], { cwd: repo });
+  assert.equal(worktrees.stdout.trim().split("\n").length, 1, "a sandbox was left behind");
+});

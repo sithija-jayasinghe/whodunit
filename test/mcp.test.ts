@@ -282,7 +282,8 @@ test("a cancelled request gets no response, and the server keeps serving", async
     client.write({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: "slow" } });
     const progressBefore = client.messages.length;
 
-    // Long enough for the doctor's two one-second runs to finish.
+    // Longer than the doctor's two one-second runs, so a response would have
+    // arrived by now if the cancellation were ignored.
     await new Promise((resolve) => setTimeout(resolve, 3500));
     const pong = await client.request("ping");
 
@@ -293,6 +294,47 @@ test("a cancelled request gets no response, and the server keeps serving", async
       0,
       "no progress after cancellation",
     );
+  } finally {
+    await client.close();
+  }
+});
+
+test("cancelling a request stops its test and removes its sandbox", async () => {
+  const marker = join(root, "cancel.where");
+  const pidFile = join(root, "cancel.pid");
+  const client = new Client({ MARK: marker, PID_FILE: pidFile });
+  try {
+    client.write({
+      jsonrpc: "2.0",
+      id: "doomed",
+      method: "tools/call",
+      params: {
+        name: "whodunit_doctor",
+        arguments: { cwd: repo, command: ["sh", "-c", 'echo $$ > "$PID_FILE"; pwd > "$MARK"; sleep 30'] },
+      },
+    });
+    const deadline = Date.now() + 15000;
+    while (!existsSync(marker)) {
+      if (Date.now() > deadline) throw new Error("the test never started");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const sandbox = (await readFile(marker, "utf8")).trim();
+    const testPid = Number((await readFile(pidFile, "utf8")).trim());
+
+    const cancelledAt = Date.now();
+    client.write({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: "doomed" } });
+    // Well inside the 30 seconds the test would otherwise run.
+    while (existsSync(sandbox)) {
+      if (Date.now() - cancelledAt > 5000) throw new Error(`sandbox ${sandbox} outlived the cancellation`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    assert.throws(() => process.kill(testPid, 0), "the test process is still running");
+    const worktrees = await execOrThrow("git", ["worktree", "list"], { cwd: repo });
+    assert.equal(worktrees.stdout.trim().split("\n").length, 1, worktrees.stdout);
+    assert.deepEqual((await client.request("ping")).result, {});
+    assert.equal(client.messages.find((message) => message.id === "doomed"), undefined);
   } finally {
     await client.close();
   }
