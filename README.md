@@ -8,7 +8,7 @@
 
 **Find which change broke your test — and prove it.**
 
-An AI agent just edited 13 files. A test that passed is now red. Instead of
+An AI agent just edited a dozen files. A test that passed is now red. Instead of
 reading a diff you did not write, run one command:
 
 ```bash
@@ -20,35 +20,11 @@ test against subsets of them until it isolates the smallest set that still
 breaks it. It does not guess. It has watched the test pass without the
 culprit and fail with it.
 
-```
-  Snapshotting working tree...
-  Testing baseline (37 changes to search)...
-  Confirming the current tree fails...
-  Searching...
-    [ 1]   19 of 37   PASS
-    [ 2]   18 of 37   FAIL
-    [ 3]    9 of 18   PASS
-    [ 4]    9 of 18   FAIL
-    [ 5]    5 of 9    FAIL
-    [ 6]    3 of 5    FAIL
-    [ 7]    2 of 3    FAIL
-    [ 8]    1 of 2    PASS
-    [ 9]    1 of 2    FAIL
+![A terminal: git shows 12 files changed, the test fails, and whodunit runs 11 tests to find the one changed line that broke it.](docs/demo.gif)
 
-  Found it. 1 change out of 37:
-
-  src/mod7.js, line 7
-
-    -  return input * 72 + 2;
-    +  // normalized in refactor pass
-    +  const scaled = input * 72;
-    +  return scaled;
-
-  Proven: the test passes without this change and fails with it.
-  11 test runs in 1.1s.
-```
-
-Real output, from the fixture that [`test/make-fixture.sh`](test/make-fixture.sh) builds: 37 changes across 13 files.
+A real recording of a real search, on the fixture that
+[`test/make-fixture.sh`](test/make-fixture.sh) builds: 37 changes across 12
+edited files and one new one, and a single broken line. Re-record it with `npm run demo`.
 
 - **Proof, not a guess.** Every answer is backed by test runs you can see.
 - **Safe.** It works in a throwaway copy. Your files are never touched, even if you press Ctrl+C.

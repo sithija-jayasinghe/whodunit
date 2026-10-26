@@ -29,6 +29,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
+    "demo": "npm run build && vhs docs/demo.tape",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "test": "node --import tsx --test test/*.test.ts"
