@@ -344,8 +344,7 @@ export const DEFAULT_TAX_RATE = 0.0825;
 
 /**
  * Sales tax on an amount.
- * @param {number} rate e.g. 0.0825 for 8.25%. Required: callers always pass
- *   the rate, so there is no hidden default here. 0 means tax-free.
+ * @param {number} rate e.g. 0.0825 for 8.25%
  */
 export function tax(amount, rate) {
   if (!rate) return 0;
@@ -434,10 +433,7 @@ import { shipping } from "./shipping.js";
 import { isWeekend } from "./dates.js";
 import { roundCents } from "./round.js";
 
-/**
- * Build an invoice: every saving, the tax, the shipping and the total.
- * Leave taxRate out to use the standard rate: tax() applies the default.
- */
+/** Build an invoice: every saving, the tax, the shipping and the total. */
 export function invoice(items, { points = 0, taxRate, date = new Date(), coupon } = {}) {
   const sub = subtotal(items);
   const bulk = bulkSavings(items);
