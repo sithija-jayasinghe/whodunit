@@ -1,8 +1,17 @@
 {
   "name": "whodunit",
-  "version": "0.0.1",
-  "description": "Find which single change broke your test. Binary-searches a diff against a failing test until it proves the culprit.",
+  "version": "0.1.0",
+  "description": "Find which single change broke your test. Splits a diff into hunks and delta-debugs them against a failing test until it proves the culprit. CLI and MCP server.",
   "license": "MIT",
+  "author": "Sithija Jayasinghe",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sithija-jayasinghe/whodunit.git"
+  },
+  "homepage": "https://github.com/sithija-jayasinghe/whodunit#readme",
+  "bugs": {
+    "url": "https://github.com/sithija-jayasinghe/whodunit/issues"
+  },
   "type": "module",
   "bin": {
     "whodunit": "dist/cli.js"
@@ -10,26 +19,32 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "test": "node --import tsx --test test/*.test.ts"
   },
   "keywords": [
     "debugging",
     "delta-debugging",
+    "ddmin",
     "bisect",
     "git",
     "testing",
+    "regression",
     "ai",
-    "regression"
+    "agent",
+    "mcp",
+    "mcp-server"
   ],
   "dependencies": {},
   "devDependencies": {

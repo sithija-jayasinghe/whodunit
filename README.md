@@ -71,7 +71,13 @@ the run ends — including when you press Ctrl+C.
 
 ## Install
 
-whodunit is not on npm yet. From a clone:
+```bash
+npm install -g whodunit
+```
+
+Or run it without installing, as `npx whodunit -- <test command>`.
+
+From a clone instead:
 
 ```bash
 npm install
@@ -79,8 +85,9 @@ npm run build
 npm link
 ```
 
-`npm link` puts `whodunit` on your PATH. To run it without linking, use
-`node dist/cli.js` in its place, or `npx tsx src/cli.ts` to skip the build.
+`npm link` puts your checkout's `whodunit` on your PATH. To run it without
+linking, use `node dist/cli.js` in its place, or `npx tsx src/cli.ts` to skip
+the build.
 
 ## Usage
 
@@ -209,13 +216,14 @@ removed or changes meaning.
 [Model Context Protocol](https://modelcontextprotocol.io), so a coding agent
 can find the change that broke a test on its own, right after making it.
 
-With Claude Code, after `npm link`:
+With Claude Code:
 
 ```bash
-claude mcp add whodunit -- whodunit mcp
+claude mcp add whodunit -- npx -y whodunit mcp
 ```
 
-Any other MCP client takes the same command: `whodunit mcp`, over stdio.
+Any other MCP client takes the same command, `npx -y whodunit mcp`, over
+stdio. If whodunit is installed globally, `whodunit mcp` works too.
 
 It exposes three tools:
 
